@@ -1,0 +1,46 @@
+{
+  "skill_name": "image-to-webp",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I need to grab a product image from Pexels for my store. Download https://images.pexels.com/photos/90946/pexels-photo-90946.jpeg and convert it to WebP at thumb, medium, and large sizes. Save them to public/images with the name 'coffee-shop'.",
+      "expected_output": "Three WebP files created in public/images: coffee-shop-thumb.webp (150x150), coffee-shop-medium.webp (600x600), coffee-shop-large.webp (1200xauto). Each file should exist and be valid WebP.",
+      "files": [],
+      "assertions": [
+        {"name": "creates_three_files", "type": "file_count", "expected": 3, "description": "Exactly 3 WebP files created"},
+        {"name": "thumb_is_150x150", "type": "image_dimensions", "expected": "150x150", "description": "Thumb size is exactly 150x150 (center-cropped)"},
+        {"name": "medium_is_600x600", "type": "image_dimensions", "expected": "600x600", "description": "Medium size is exactly 600x600 (center-cropped)"},
+        {"name": "large_width_is_1200", "type": "image_width", "expected": 1200, "description": "Large size has width of 1200px with auto height"},
+        {"name": "naming_with_presets", "type": "filename_pattern", "expected": "coffee-shop-{thumb,medium,large}.webp", "description": "Files named with size preset suffixes"},
+        {"name": "files_are_webp", "type": "file_format", "expected": "webp", "description": "All files are valid WebP format"}
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I have a local image at /tmp/sample-product.jpg that I need resized to 400x400 and converted to WebP for my product listing page. Put it in public/images.",
+      "expected_output": "A WebP file created in public/images named sample-product-400x400.webp at exactly 400x400 pixels. The file should be valid WebP format.",
+      "files": [],
+      "assertions": [
+        {"name": "creates_webp_file", "type": "file_count", "expected": 1, "description": "Exactly 1 WebP file created"},
+        {"name": "dimensions_are_400x400", "type": "image_dimensions", "expected": "400x400", "description": "Image is exactly 400x400 pixels"},
+        {"name": "filename_includes_dimensions", "type": "filename_pattern", "expected": "sample-product-400x400.webp", "description": "Filename includes the custom dimension suffix"},
+        {"name": "file_is_webp", "type": "file_format", "expected": "webp", "description": "File is valid WebP format"}
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Download https://images.pexels.com/photos/414612/pexels-photo-414612.jpeg and generate thumb, small, medium, and large sizes as WebP so I can use them in a responsive image srcset. Name them 'mountain-lake'.",
+      "expected_output": "Four WebP files in public/images: mountain-lake-thumb.webp (150x150), mountain-lake-small.webp (300x300), mountain-lake-medium.webp (600x600), mountain-lake-large.webp (1200xauto). Plus HTML srcset usage guidance.",
+      "files": [],
+      "assertions": [
+        {"name": "creates_four_files", "type": "file_count", "expected": 4, "description": "Exactly 4 WebP files created"},
+        {"name": "thumb_is_150x150", "type": "image_dimensions", "expected": "150x150", "description": "Thumb is exactly 150x150 (center-cropped)"},
+        {"name": "small_is_300x300", "type": "image_dimensions", "expected": "300x300", "description": "Small is exactly 300x300 (center-cropped)"},
+        {"name": "medium_is_600x600", "type": "image_dimensions", "expected": "600x600", "description": "Medium is exactly 600x600 (center-cropped)"},
+        {"name": "large_width_is_1200", "type": "image_width", "expected": 1200, "description": "Large has width of 1200px with auto height"},
+        {"name": "correct_preset_naming", "type": "filename_pattern", "expected": "mountain-lake-{thumb,small,medium,large}.webp", "description": "Files named with size preset suffixes"},
+        {"name": "provides_srcset_guidance", "type": "output_contains", "expected": "srcset or <picture> or responsive", "description": "Output includes responsive image usage guidance"}
+      ]
+    }
+  ]
+}
