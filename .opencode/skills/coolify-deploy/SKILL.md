@@ -153,9 +153,10 @@ UPLOAD_DIR=./uploads
 
 ### 1. `postgres://` vs `postgresql://`
 
-Coolify generates `DATABASE_URL` with `postgres://`. SQLAlchemy 2.0+ requires `postgresql://`. Always normalize in both code and scripts:
+Coolify generates `DATABASE_URL` with `postgres://`. SQLAlchemy 2.0+ and Prisma's `@prisma/adapter-pg` require `postgresql://`. Always normalize in both code and scripts:
 
 ```python
+# Python / SQLAlchemy
 class Settings(BaseSettings):
     DATABASE_URL: str
 
@@ -165,6 +166,17 @@ class Settings(BaseSettings):
         if url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql://", 1)
         return url
+```
+
+```typescript
+// TypeScript / Prisma 7+
+function getDatabaseUrl(): string {
+  let url = process.env.DATABASE_URL || "";
+  if (url.startsWith("postgres://")) {
+    url = url.replace("postgres://", "postgresql://");
+  }
+  return url;
+}
 ```
 
 ### 2. Default Database Is `postgres` — Not Yours
@@ -252,7 +264,7 @@ if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
 fi
 ```
 
-### Complete Entrypoint Template
+### Complete Entrypoint Template (Python)
 
 ```sh
 #!/bin/sh
@@ -274,6 +286,53 @@ echo "Running migrations..."
 alembic upgrade head || echo "WARNING: Migration failed"
 
 exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+### Complete Entrypoint Template (Next.js with Prisma 7+)
+
+```sh
+#!/bin/sh
+# NO set -e — per Coolify deployment guide
+
+DATABASE_URL=$(echo "$DATABASE_URL" | sed 's|^postgres://|postgresql://|')
+export DATABASE_URL
+
+echo "Checking database connection..."
+MAX_RETRIES=30
+RETRY_COUNT=0
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+  if node db-check.js 2>&1; then
+    break
+  fi
+  RETRY_COUNT=$((RETRY_COUNT + 1))
+  echo "Retry $RETRY_COUNT/$MAX_RETRIES..."
+  sleep 3
+done
+
+if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+  echo "WARNING: Could not connect to database, starting anyway"
+fi
+
+exec node server.js
+```
+
+Where `db-check.js` is a standalone script at the project root:
+```javascript
+const { PrismaPg } = require("@prisma/adapter-pg");
+const { PrismaClient } = require("@prisma/client");
+
+let url = process.env.DATABASE_URL || "";
+if (url.startsWith("postgres://")) {
+  url = url.replace("postgres://", "postgresql://");
+}
+
+const adapter = new PrismaPg({ connectionString: url });
+const p = new PrismaClient({ adapter });
+
+p.$connect()
+  .then(() => { console.log("Database connected"); return p.$disconnect(); })
+  .then(() => process.exit(0))
+  .catch((e) => { console.error("Database connection failed:", e.message); process.exit(1); });
 ```
 
 ## Frontend (Next.js) on Coolify
@@ -336,6 +395,194 @@ try {
 }
 ```
 
+## Next.js + Prisma 7+ on Coolify (Critical Gotchas)
+
+Prisma 7.x has breaking changes that affect Docker deployments. These are the most common deployment failures.
+
+### 1. Prisma 7 Requires Node ≥ 22
+
+Prisma 7.8+ requires Node.js 22 or later. Using `node:20-alpine` causes runtime errors:
+
+```dockerfile
+# WRONG
+FROM node:20-alpine AS base
+
+# CORRECT
+FROM node:22-alpine AS base
+```
+
+### 2. Prisma 7 Uses "Client" Engine — Requires Driver Adapter
+
+Prisma 7.x switched from the binary engine to a "client" engine. For PostgreSQL, you **must** install `@prisma/adapter-pg` and `pg`, then configure PrismaClient with the adapter:
+
+```bash
+npm install @prisma/adapter-pg pg
+```
+
+```typescript
+// src/lib/db.ts
+import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+
+function getDatabaseUrl(): string {
+  let url = process.env.DATABASE_URL || "";
+  if (url.startsWith("postgres://")) {
+    url = url.replace("postgres://", "postgresql://");
+  }
+  return url;
+}
+
+const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+
+export const prisma =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    adapter: new PrismaPg({ connectionString: getDatabaseUrl() }),
+    log:
+      process.env.NODE_ENV === "development"
+        ? ["query", "error", "warn"]
+        : ["error"],
+  });
+
+if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+```
+
+Without the adapter, you get:
+```
+PrismaClientConstructorValidationError: Using engine type "client" requires
+either "adapter" or "accelerateUrl" to be provided to PrismaClient constructor.
+```
+
+### 3. `npm ci` Fails in Docker — Use `npm install --legacy-peer-deps`
+
+Local npm v11+ generates a lock file that Docker's npm v10 can't read. The error:
+```
+npm ci can only install packages when your package.json and package-lock.json
+are in sync. Missing: @swc/helpers@0.5.23 from lock file
+```
+
+**Fix**: Use `npm install --legacy-peer-deps` instead of `npm ci` in the Dockerfile:
+
+```dockerfile
+FROM node:22-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm install --legacy-peer-deps
+```
+
+### 4. Standalone Output Missing Required Packages
+
+Next.js standalone output (`output: "standalone"`) creates a minimal `node_modules/` that excludes many packages your app needs at runtime. You **must** manually copy missing packages from the builder stage.
+
+Always check after building which packages are missing:
+```bash
+# After local build, check what's in standalone vs full node_modules
+ls .next/standalone/node_modules/@prisma/
+# If packages like adapter-pg are missing, copy them in the Dockerfile
+```
+
+**Prerequisites to copy for Prisma 7 with PostgreSQL:**
+
+```dockerfile
+# Standalone output already includes @prisma/client, @prisma/client-runtime-utils, .prisma/client
+# But you MUST copy these additional packages:
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma/adapter-pg ./node_modules/@prisma/adapter-pg
+COPY --from=builder /app/node_modules/@prisma/driver-adapter-utils ./node_modules/@prisma/driver-adapter-utils
+COPY --from=builder /app/node_modules/postgres-array ./node_modules/postgres-array
+```
+
+⚠️ Always check `node_modules/postgres-array` in your standalone output. Next.js creates a "stub" (only `package.json`, no `index.js`) for some packages. If the stub has no real code, you must copy the full package from the builder stage.
+
+### 5. `npx prisma db push` Doesn't Work in Standalone Mode
+
+In the Next.js standalone Docker runner, `npx prisma` will fail because:
+- The standalone `node_modules/.bin/` doesn't have the `prisma` binary
+- Even if you copy `prisma`, it depends on `@prisma/config` which needs `effect` and other packages not in standalone output
+- The Prisma CLI is ~60MB+ with all its dependencies
+
+**Solutions** (pick one):
+
+**Option A: Create tables via Coolify's PostgreSQL terminal (recommended)**
+1. Go to your PostgreSQL resource in Coolify
+2. Click **Exec** / **Terminal**
+3. Run: `psql -U youruser -d yourdb`
+4. Create tables with raw SQL
+5. This is the cleanest approach — no bloat in the Docker image
+
+**Option B: Create tables via app container terminal using PrismaClient**
+1. Go to your app resource in Coolify
+2. Click **Exec** / **Terminal**
+3. `cd /app` (you may start at `/`)
+4. Run a Node.js one-liner to create tables:
+
+```sh
+node -e "
+const { PrismaPg } = require('@prisma/adapter-pg');
+const { PrismaClient } = require('@prisma/client');
+let url = process.env.DATABASE_URL;
+if (url.startsWith('postgres://')) url = url.replace('postgres://', 'postgresql://');
+const adapter = new PrismaPg({ connectionString: url });
+const p = new PrismaClient({ adapter });
+p.\$executeRawUnsafe('CREATE TABLE IF NOT EXISTS \\\"Lead\\\" (...)').then(() => { console.log('Done'); p.\$disconnect(); }).catch(e => { console.error(e.message); p.\$disconnect(); });
+"
+```
+
+**Option C: Use a `db-check.js` file for health checks, create tables manually once**
+
+Include a `db-check.js` in your project that uses PrismaClient (not Prisma CLI) to test connectivity. Create tables once after first deploy via Option A or B.
+
+### 6. Missing Environment Variables Crash Services at Import Time
+
+Libraries like `resend` throw errors if instantiated without required API keys:
+
+```typescript
+// WRONG — crashes if RESEND_API_KEY is not set
+import { Resend } from "resend";
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+// CORRECT — lazily initialize, gracefully skip if not configured
+import { Resend } from "resend";
+
+const resend = process.env.RESEND_API_KEY
+  ? new Resend(process.env.RESEND_API_KEY)
+  : null;
+
+export async function sendEmail(data: any) {
+  if (!resend) {
+    console.warn("RESEND_API_KEY not configured, skipping email");
+    return;
+  }
+  return resend.emails.send(data);
+}
+```
+
+Any service that requires configuration at import time (API keys, URLs, credentials) must be initialized lazily or wrapped in try/catch.
+
+### 7. Normalizing `postgres://` to `postgresql://` in Code
+
+Coolify generates `DATABASE_URL` with `postgres://`. The `@prisma/adapter-pg` driver requires `postgresql://`. Normalize in your `db.ts`, NOT just the entrypoint:
+
+```typescript
+// db.ts — normalize at the application level
+function getDatabaseUrl(): string {
+  let url = process.env.DATABASE_URL || "";
+  if (url.startsWith("postgres://")) {
+    url = url.replace("postgres://", "postgresql://");
+  }
+  return url;
+}
+```
+
+Also normalize in `db-check.js` and any shell scripts:
+```sh
+DATABASE_URL=$(echo "$DATABASE_URL" | sed 's|^postgres://|postgresql://|')
+export DATABASE_URL
+```
+
 ## Dockerfile Templates
 
 ### Python Backend (FastAPI/Django/Flask)
@@ -361,15 +608,71 @@ HEALTHCHECK --interval=10s --timeout=5s --start-period=120s --retries=10 \
 CMD ["sh", "entrypoint.sh"]
 ```
 
-### Next.js Frontend (Multi-stage)
+### Next.js + Prisma 7 (Complete Template)
 
 ```dockerfile
-FROM node:20-alpine AS base
+FROM node:22-alpine AS base
 
 FROM base AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm install --legacy-peer-deps
+
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN npx prisma generate
+RUN npm run build
+
+FROM base AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+# Copy standalone Next.js output
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+
+# Copy Prisma schema + full @prisma packages for PrismaClient with adapter
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+
+# Copy PG driver adapter packages (not included in standalone output)
+# ⚠️ Always verify these are missing from .next/standalone/node_modules/ after build
+COPY --from=builder /app/node_modules/@prisma/adapter-pg ./node_modules/@prisma/adapter-pg
+COPY --from=builder /app/node_modules/@prisma/driver-adapter-utils ./node_modules/@prisma/driver-adapter-utils
+COPY --from=builder /app/node_modules/postgres-array ./node_modules/postgres-array
+
+# Copy db check script and entrypoint
+COPY --from=builder /app/db-check.js ./db-check.js
+COPY --from=builder /app/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
+
+USER nextjs
+EXPOSE 3000
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=5 \
+  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/ || exit 1
+
+CMD ["sh", "entrypoint.sh"]
+```
+
+### Next.js Frontend (Simple, No Prisma)
+
+```dockerfile
+FROM node:22-alpine AS base
+
+FROM base AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm install --legacy-peer-deps
 
 FROM base AS builder
 WORKDIR /app
@@ -411,10 +714,71 @@ __pycache__/
 node_modules/
 .next/
 .git/
+.env
 .env.local
 .env*.local
-*.md
 ```
+
+⚠️ Do NOT include `*.md` in `.dockerignore` — it can exclude important files like entrypoint documentation. Be specific about what to exclude.
+
+## Post-Deploy Database Setup
+
+After deploying to Coolify, you must create the database and tables. Do NOT rely on `npx prisma db push` in the entrypoint — it doesn't work in standalone mode.
+
+### Step 1: Create the Database
+
+The Coolify PostgreSQL `DATABASE_URL` points to the `postgres` database by default. Create your app database:
+
+1. Go to your app container **Terminal** in Coolify
+2. `cd /app`
+3. Run:
+```sh
+node -e "
+const { PrismaPg } = require('@prisma/adapter-pg');
+const { PrismaClient } = require('@prisma/client');
+let url = process.env.DATABASE_URL;
+if (url.startsWith('postgres://')) url = url.replace('postgres://', 'postgresql://');
+const adapter = new PrismaPg({ connectionString: url.replace(/\/[^\/]*$/, '/postgres') });
+const p = new PrismaClient({ adapter });
+p.\$executeRawUnsafe('CREATE DATABASE myapp').then(() => { console.log('Database created'); p.\$disconnect(); }).catch(e => { console.log(e.message); p.\$disconnect(); });
+"
+```
+
+### Step 2: Update DATABASE_URL
+
+In Coolify's **Environment Variables**, change `DATABASE_URL` to point to your new database:
+```
+# From:
+postgres://user:pass@host:5432/postgres
+# To:
+postgresql://user:pass@host:5432/myapp
+```
+
+### Step 3: Create Tables
+
+Method A — Via app container terminal:
+```sh
+# Connect to your app container terminal, then:
+node -e "
+const { PrismaPg } = require('@prisma/adapter-pg');
+const { PrismaClient } = require('@prisma/client');
+let url = process.env.DATABASE_URL;
+if (url.startsWith('postgres://')) url = url.replace('postgres://', 'postgresql://');
+const adapter = new PrismaPg({ connectionString: url });
+const p = new PrismaClient({ adapter });
+p.\$executeRawUnsafe('CREATE TABLE IF NOT EXISTS \\\"Lead\\\" (...)').then(() => { console.log('Done'); p.\$disconnect(); }).catch(e => { console.error(e.message); p.\$disconnect(); });
+"
+```
+
+Method B — Via PostgreSQL container terminal (simpler):
+1. Go to your PostgreSQL resource in Coolify
+2. Click **Terminal**
+3. Run: `psql -U youruser -d yourdb`
+4. Paste your CREATE TABLE SQL
+
+### Step 4: Redeploy
+
+After creating the database and tables, redeploy the app so it picks up the new `DATABASE_URL`.
 
 ## CORS & Cross-Domain Configuration
 
@@ -470,6 +834,44 @@ After deploying, verify every endpoint:
 - [ ] Health check passing? Check health check logs
 - [ ] App starts successfully? Look for uvicorn/node startup messages
 
+### `npm ci` Fails with Lock File Out of Sync
+- [ ] Using `npm ci` in Dockerfile with lock file generated by npm v11+?
+- [ ] **Fix**: Change `RUN npm ci` to `RUN npm install --legacy-peer-deps`
+- [ ] Or regenerate lock file inside Docker with matching npm version
+- [ ] This happens because npm v11 lock files are incompatible with npm v10 used in Docker
+
+### Prisma 7 `PrismaClientConstructorValidationError`
+- [ ] Error: "Using engine type 'client' requires either 'adapter' or 'accelerateUrl'"?
+- [ ] **Fix**: Install `@prisma/adapter-pg` and `pg`, configure PrismaClient with the adapter
+- [ ] Prisma 7 defaults to "client" engine type which requires a driver adapter
+
+### `Cannot find module 'postgres-array'` or Other Missing Packages
+- [ ] Running Next.js standalone in Docker?
+- [ ] Next.js standalone creates stub packages (just `package.json`, no real code)
+- [ ] **Fix**: Copy the full package from builder stage in Dockerfile
+- [ ] Always check `.next/standalone/node_modules/` after building for stubs vs real packages
+
+### `npx prisma db push` Gives "sh: prisma: not found"
+- [ ] Running inside Next.js standalone Docker container?
+- [ ] The `prisma` CLI binary is NOT in standalone's `node_modules/.bin/`
+- [ ] Even copying it manually doesn't work — it has too many transitive dependencies
+- [ ] **Fix**: Use PrismaClient (not CLI) for DB checks, create tables via Coolify terminal or raw SQL
+
+### Database `does not exist` Error
+- [ ] Coolify's `DATABASE_URL` points to `/postgres` database by default
+- [ ] **Fix**: Create your app database via terminal (see Post-Deploy Database Setup)
+- [ ] Update `DATABASE_URL` in Coolify env vars to point to `/your_db_name`
+
+### `Lead` Table Does Not Exist
+- [ ] First deployment? Tables haven't been created yet
+- [ ] **Fix**: Create tables via Coolify terminal (see Post-Deploy Database Setup)
+- [ ] Don't rely on `npx prisma db push` in entrypoint for standalone mode
+
+### Service Crashes at Import Time (Resend, etc.)
+- [ ] Library instantiated at module level without required API key?
+- [ ] **Fix**: Initialize lazily, skip functionality if key is not set
+- [ ] `new Resend(undefined)` crashes — wrap in conditional
+
 ### CORS Errors (Browser DevTools)
 - [ ] `CORS_ORIGINS` set in backend env vars?
 - [ ] Includes all frontend domains with `https://` prefix?
@@ -507,7 +909,7 @@ After deploying, verify every endpoint:
 | Mistake | Symptom | Fix |
 |---------|---------|-----|
 | Wrong port (3000 default) | 502 Bad Gateway | Set port to match app listen port |
-| `postgres://` in DATABASE_URL | SQLAlchemy crash | Normalize to `postgresql://` |
+| `postgres://` in DATABASE_URL | Prisma/SQLAlchemy crash | Normalize to `postgresql://` |
 | `set -e` in entrypoint | Container crash loop | Remove, use explicit error handling |
 | `exit 1` on DB failure | Restart loop | Log warning, start anyway |
 | `NEXT_PUBLIC_*` only in env vars | Frontend sees `undefined` | Set in BOTH Build Args and Env Vars |
@@ -515,7 +917,7 @@ After deploying, verify every endpoint:
 | `curl` on Alpine | Command not found | Use `wget` |
 | `docker-compose.yml` with Coolify | Config conflicts | Use separate Coolify resources |
 | Missing CORS origins | Browser blocks API | Add all frontend domains |
-| Default DB is `postgres` | Tables not found | Create app DB in entrypoint |
+| Default DB is `postgres` | Tables not found | Create app DB, update DATABASE_URL |
 | Stale volumes after password change | Auth fails | Delete old volumes |
 | `psycopg2` not `psycopg2-binary` | Build fails | Use binary package |
 | No `cache: "no-store"` | Stale data | Add to all dynamic fetches |
@@ -524,3 +926,11 @@ After deploying, verify every endpoint:
 | Missing persistent volume | Uploads lost on redeploy | Mount volume to upload dir |
 | `EXPOSE` without Coolify port set | 502 Bad Gateway | Set both |
 | No health check defined | Unhealthy undetected | Add HEALTHCHECK to Dockerfile |
+| `npm ci` fails in Docker | Lock file out of sync | Use `npm install --legacy-peer-deps` |
+| Prisma 7 without adapter | `PrismaClientConstructorValidationError` | Install `@prisma/adapter-pg` + `pg`, configure adapter |
+| Node 20 with Prisma 7 | `EBADENGINE` warning → runtime crash | Use `node:22-alpine` |
+| Standalone missing packages | `Cannot find module` runtime errors | Copy missing packages from builder stage |
+| `npx prisma db push` in standalone | `sh: prisma: not found` | Use PrismaClient or raw SQL for DB setup |
+| `new Resend(undefined)` | `Missing API key` crash | Initialize lazily with null check |
+| `postgres-array` stub in standalone | `Cannot find module` at runtime | Copy full package from builder stage |
+| `*.md` in .dockerignore | Important docs excluded | Be specific, don't blanket exclude |
