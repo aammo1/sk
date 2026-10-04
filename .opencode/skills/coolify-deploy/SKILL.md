@@ -1,6 +1,6 @@
 ---
 name: coolify-deploy
-description: Deploy applications on Coolify — a self-hosted PaaS (like Heroku/Vercel) that runs on your own VPS. Covers project setup, Dockerfile templates, health checks, database configuration, environment variables, CORS, persistent volumes, DNS, and debugging. Use when the user is deploying to Coolify, setting up a Coolify project, troubleshooting a Coolify deployment, or mentions Coolify, self-hosting, VPS deployment, Traefik, or Docker-based PaaS.
+description: Deploy applications on Coolify — a self-hosted PaaS (like Heroku/Vercel) that runs on your own VPS. Covers project setup, Dockerfile templates, health checks, database configuration, environment variables, CORS, persistent volumes, DNS, and debugging. Use when the user is deploying to Coolify, setting up a Coolify project, troubleshooting a broken deployment (502s, CORS errors, failing health checks, "connection refused" healthcheck logs, SIGSEGV crashes, EBADENGINE warnings), or mentions Coolify, self-hosting, VPS deployment, Traefik, or Docker-based PaaS.
 ---
 
 # Coolify Deployment
@@ -10,7 +10,7 @@ description: Deploy applications on Coolify — a self-hosted PaaS (like Heroku/
 Use this skill when the user:
 - Is deploying any application (Python/Node.js/Go) on Coolify
 - Is setting up a new Coolify project with backend + frontend + database
-- Has a Coolify deployment that's broken (502, CORS errors, health check failures, etc.)
+- Has a Coolify deployment that's broken (502, CORS errors, health check failures, "connection refused" healthcheck logs, SIGSEGV crashes, EBADENGINE warnings, etc.)
 - Mentions Coolify, self-hosted PaaS, or needs a self-hosted Vercel/Heroku alternative
 - Is writing Dockerfiles or entrypoint scripts for Coolify deployment
 - Is configuring domains, SSL, or reverse proxy on Coolify
@@ -112,6 +112,22 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=5 \
 ```
 
 Use `127.0.0.1` NOT `localhost` — Alpine's `wget` resolves `localhost` to IPv6 `[::1]` but Node.js standalone only listens on IPv4. Use `wget` not `curl` on Alpine (curl not installed by default).
+
+### The HOSTNAME Bind Trap (Next.js standalone)
+
+If the healthcheck fails with `wget: can't connect to remote host (127.0.0.1): Connection refused` while the app logs show `✓ Ready in ...`, the app is alive — the healthcheck is just knocking on the wrong door. Next.js standalone's `server.js` picks its bind address from the `HOSTNAME` env var, and Docker silently injects `HOSTNAME` into every container (the container ID). The server then binds ONLY to the container's network interface, leaving `127.0.0.1` dead inside the container — so the healthcheck gets "Connection refused" and Coolify rolls back the deployment.
+
+The giveaway in the startup log:
+```
+- Local: http://133c52634dc8:3000   ← container ID, not localhost
+```
+
+Fix — pin the bind address in the runner stage:
+```dockerfile
+ENV HOSTNAME="0.0.0.0"   # listen on ALL interfaces, incl. 127.0.0.1 (healthcheck) + container IP (proxy)
+```
+
+(Setting `HOSTNAME=0.0.0.0` in Coolify's env vars also works, but keeping it in the Dockerfile next to the HEALTHCHECK keeps the image self-contained.)
 
 ### Parameters
 
@@ -585,6 +601,8 @@ export DATABASE_URL
 
 ## Dockerfile Templates
 
+> **Choosing the Node version:** before writing `FROM node:XX-alpine`, check the `engines.node` requirements of your native dependencies (better-sqlite3, bcrypt, sharp, canvas, sqlite3, etc.) and use the SAME version in ALL stages (deps/builder/runner). A mismatch produces `EBADENGINE` warnings, and native modules can SIGSEGV instead of failing cleanly — see "Build Worker SIGSEGV / EBADENGINE" under Debugging by Symptom.
+
 ### Python Backend (FastAPI/Django/Flask)
 
 ```dockerfile
@@ -840,6 +858,14 @@ After deploying, verify every endpoint:
 - [ ] Or regenerate lock file inside Docker with matching npm version
 - [ ] This happens because npm v11 lock files are incompatible with npm v10 used in Docker
 
+### Build Worker SIGSEGV / EBADENGINE (Native Module vs Node Version Mismatch)
+- [ ] Log shows `npm warn EBADENGINE package: 'better-sqlite3@13.x.x', required: { node: '>=22' }, current: { node: 'v20.x.x' }` (or similar for bcrypt, sharp, canvas, sqlite3, nanoid)?
+- [ ] Then `⨯ Next.js build worker exited with code: null and signal: SIGSEGV`, usually during "Collecting page data" — the moment server routes first import the native module
+- [ ] Native modules compile/load against a specific Node ABI; an older base image segfaults instead of erroring cleanly
+- [ ] It works locally because your local Node is newer than the Dockerfile's base image
+- [ ] **Fix**: bump ALL Dockerfile stages (deps/builder/runner) to the Node version the dependency requires — e.g. better-sqlite3@13 requires node >=22 → `FROM node:22-alpine` everywhere
+- [ ] Quick audit: `grep '"node"' package-lock.json | sort -u` and cross-check each native dependency's `engines` field
+
 ### Prisma 7 `PrismaClientConstructorValidationError`
 - [ ] Error: "Using engine type 'client' requires either 'adapter' or 'accelerateUrl'"?
 - [ ] **Fix**: Install `@prisma/adapter-pg` and `pg`, configure PrismaClient with the adapter
@@ -903,6 +929,7 @@ After deploying, verify every endpoint:
 - [ ] `127.0.0.1` not `localhost` in Alpine containers?
 - [ ] `wget` not `curl` on Alpine?
 - [ ] `start-period` long enough (60-120s)?
+- [ ] Next.js standalone: `HOSTNAME="0.0.0.0"` pinned in the runner stage? (Docker injects `HOSTNAME=<container-id>` — server binds to the container interface only and 127.0.0.1 gets "Connection refused" even though the app logs "Ready"; see "The HOSTNAME Bind Trap")
 
 ## Common Mistakes Reference
 
@@ -929,6 +956,8 @@ After deploying, verify every endpoint:
 | `npm ci` fails in Docker | Lock file out of sync | Use `npm install --legacy-peer-deps` |
 | Prisma 7 without adapter | `PrismaClientConstructorValidationError` | Install `@prisma/adapter-pg` + `pg`, configure adapter |
 | Node 20 with Prisma 7 | `EBADENGINE` warning → runtime crash | Use `node:22-alpine` |
+| Base image Node older than native deps require | `EBADENGINE` warning → build worker `SIGSEGV` at "Collecting page data" | Bump ALL stages to the Node version the deps' `engines` require |
+| `HOSTNAME` not pinned in Next.js standalone | Healthcheck "Connection refused" on 127.0.0.1 while app logs "Ready" | Add `ENV HOSTNAME="0.0.0.0"` to runner stage |
 | Standalone missing packages | `Cannot find module` runtime errors | Copy missing packages from builder stage |
 | `npx prisma db push` in standalone | `sh: prisma: not found` | Use PrismaClient or raw SQL for DB setup |
 | `new Resend(undefined)` | `Missing API key` crash | Initialize lazily with null check |
