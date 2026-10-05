@@ -1,0 +1,30 @@
+{
+  "skill_name": "product-page-marketing-sections",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Decision-only dry run: do not edit an application or run a browser. We have an existing Next.js shop with app/products/[slug]/page.tsx shared by all products. The server page renders Gallery, PurchasePanel, Description, and RelatedProducts in that order. PurchasePanel is a client component with variant and quantity state; its form has id purchase-form and an existing add-to-cart action and analytics. Product atlas-mini has local in-hand, travel-bag, and three setup-step photos, confirmed dimensions 12 x 7 x 4 cm, and three supplied setup instructions. No verified reviews, discount, warranty, or published delivery-time policy is available. Strategy: show that it fits a travel routine and is simple to start using. Add the smallest useful set of sections only for atlas-mini, with large mobile photos, bold benefit headings, and short illustrated steps in one coherent brand palette; desktop can stay simple. Use the bundled design recipes with focused reads. Explain the proposed sections and mobile compositions, placement and file boundaries, CTA integration, treatment of missing proof, and concrete verification plan. Clearly distinguish planned checks from checks actually performed.",
+      "expected_output": "Two complementary image-led portability/quick-start sections using supplied assets and one coherent visual direction; product-scoped normal-flow insertion; static/server-friendly isolated components; link to the existing form preserving state; focused use of self-contained recipe snippets; no fabricated evidence or new commerce logic; concrete project/build, mobile/desktop and functional checks with honest dry-run limitations.",
+      "files": [],
+      "assertions": [
+        "Proposes two complementary photo-led portability and setup sections with specific mobile layout and simple desktop reuse.",
+        "Scopes the insertion to atlas-mini in the shared server page and uses isolated styles without replacing or remounting purchase state.",
+        "Uses an anchor to purchase-form and avoids unsupported proof, offers, and redundant commerce logic.",
+        "Plans relevant project/build, mobile, desktop, state-preservation, and non-target-product checks while explicitly acknowledging that they were not executed.",
+        "Uses one coherent visual direction and selected bundled recipe snippets without broad research, external design-source lookup, agents, benchmarks, or multiple design variants."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Decision-only dry run: do not edit an application or run a browser. Existing Arabic RTL product page /products/sahara has a shared Vue template, an existing form id order-form, reactive price and availability tied to selected size, a quantity control, analytics, and a fixed header. Its current hero, benefit bullets, and order form already work. Strategy: reassure buyers about fit and show three setup steps. Available facts/assets: a verified size chart with two size options and matching photos; three real instruction images and their captions; the current store return-policy text. No customer reviews or promotion are supplied. Add only two sections after the existing description, use bold heading bands and alternating numbered photo/text checkerboard panels on phones, simple desktop vue is enough, and keep all shopping behavior. A colleague suggests broad button/img styles, a second mobile order form, a hardcoded promotional price, 98% satisfaction, and a fresh Vue implementation. Assess these suggestions and give the implementation outline, including RTL, mobile compositions, CTA, scope, and verification. Use selected bundled recipe snippets and say which visual and functional checks remain unperformed.",
+      "expected_output": "Exactly two additive sections for fit and setup with bold heading bands and alternating numbered photo/text panels, consistent with supplied RTL page and facts; no migration/rewrite, duplicate form, global selectors, hardcoded price, or fake satisfaction; link to existing form with local header offset; simple shared-content desktop adaptation; scoped target rendering and explicit unverified project/build, visual, and functional checks.",
+      "files": [],
+      "assertions": [
+        "Proposes exactly two sections after the description, covering verified fit and three real setup steps with bold heading bands, alternating numbered photo/text panels, readable mobile stacking where needed, and simple desktop reuse.",
+        "Specifies product-scoped Vue integration, local styling, meaningful RTL reading order, and a header-aware link to order-form.",
+        "Rejects all five colleague suggestions: global element styles, duplicate form, hardcoded promotion, invented satisfaction, and fresh implementation.",
+        "Plans relevant project/build, mobile, purchase-state, and non-target-product checks and explicitly reports no executed visual or functionality validation."
+      ]
+    }
+  ]
+}
