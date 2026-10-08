@@ -1,0 +1,41 @@
+{
+  "skill_name": "morocco-cod-marketing",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "PROPOSED CASE — pending human approval; do not execute yet. On later approval, use only an isolated sandbox with copies of the live Product Template.md and Products_Marketing.base, never live notes. The reviewer supplies a genuinely ambiguous local product image at SANDBOX/input/ambiguous-product.png and redirects all vault operations to SANDBOX. The sandbox has no product note yet. User: 'Bghit nkhdem marketing dyal had produit, tswira hna: SANDBOX/input/ambiguous-product.png.' No identity, price, delivery terms or note creation have been approved. Begin Checkpoint 1.",
+      "expected_output": "Reads sandbox template/Base and inspects the actual image if capable; otherwise explicitly discloses inability without claiming visual observations. Runs a short research pass only if browsing is available and does not invent findings; records sources and separates quotes from interpretation. Applies the defaults (Morocco market, French customer-facing copy, English strategy) as stated summary items the user can correct, without inferring market from Darija. Offers only tentative identification where supported and asks one short batch of consequential questions (identity, price, key features, delivery terms). Does not create or modify notes/assets/template before explicit approval. Initializes the note only after approval, saving setup decisions and research findings.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "PROPOSED CASE — pending human approval; do not execute yet. On approval, use sandbox copies of the live template/Base and a synthetic organizer note initialized with: confirmed features = separate compartments and a visible layout; confirmed price 149 DH; COD payment with delivery within 2–3 days in Casablanca confirmed; no reviews yet. User: 'Move on: give me the direction.' Begin Checkpoint 2.",
+      "expected_output": "Presents one recommended direction covering audience in a concrete situation, the practical problem, possible emotional meaning with may/could/hypothesis language, desired transformation (e.g. scattered → calm), angle in plain words, feature support from confirmed facts, two or three strongest objections including COD concerns, and offer framing anchored on the confirmed 149 DH price with the confirmed delivery and payment terms. Does not walk through catalog screens and does not invent discounts, deadlines or guarantees. Asks for one approval of the direction as a whole and allows single-element corrections. Only after approval saves the direction to the mapped sandbox properties using exact live catalog labels, with a lasting body record, and marks Checkpoint 2 approved before producing the package.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "PROPOSED CASE — pending human approval; do not execute yet. On approval, use sandbox copies of the live template/Base and a synthetic product note whose direction was approved: audience = people searching for daily essentials before leaving; angle = calmer departures; transformation = scattered → calm; desires Order and Tranquility; emotion 40 - comfort; copy technique story and questions; customer-facing language French. Confirmed facts: separate compartments, visible layout, 149 DH, COD, Casablanca 2–3 days. User: 'The direction is fine, produce the package.' Begin Checkpoint 3.",
+      "expected_output": "Produces six static ads under three concepts (lived problem/solution, main benefit demonstrated, strongest objection answered) with exactly one meaningful element changed per variation, each card carrying hook, visual direction with 4:5 primary and 9:16 adaptation notes, exact on-image French text (headline, support, CTA with Paiement à la livraison), message map tracing the approved chain, an English production prompt embedding the exact French text, and negative constraints preserving the real product appearance. Produces three video scripts (9:16, 20–30 s, hook in the first 2–3 s) with scene tables, French voiceover and on-screen text. Produces a product-page brief with customer questions, message per question, evidence availability (no reviews → factual demonstration), confirmed commerce facts and a CTA to the existing order form. Requests one review-and-approve turn for the package; saves it only after approval. Does not generate images or videos from the prompts.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "PROPOSED CASE — pending human approval; do not execute yet. On approval, use sandbox copies of the live template/Base and a synthetic note created by an older workflow version containing numbered legacy sections (## 09 — Audiences, ## 05 — Reviews, ## 15 — Ad/action plan), inherited all-options lists in emotion fields with no recorded approval, manual body paragraphs and a filled ## Workflow progress showing some steps approved, some skipped, step 15 pending. User: 'I changed my mind on the audience: it is parents getting organized before school mornings, not commuters. Update the strategy and keep everything else.'",
+      "expected_output": "Rereads the note, distinguishes recorded progress from populated fields, and treats inherited all-options lists as unfilled rather than approved. Accepts the audience revision, preserves the manual paragraphs and prior research, and marks the direction and any downstream sections (ads, page brief) needs-review while retaining their content until revised approvals. Asks only the questions the revision actually requires, then saves the updated direction with exact live labels and an updated progress section via targeted patches with YAML validation.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "PROPOSED CASE — pending human approval; do not execute yet. On approval, use sandbox copies of the live template/Base and a synthetic note with an approved ad package. User pastes partial results for the six static ads, two video concepts and one video script on hold: spend, impressions, clicks, CTR, CPC and submitted order forms, but no confirmed or delivered order data and no revenue. User: 'Review these results and tell me what to do next.'",
+      "expected_output": "Enters results-review mode, accepts the pasted numbers, and labels all conclusions preliminary because confirmed, delivered and revenue data are missing. Never presents CTR or CPC alone as success and never claims profit. Compares the three concepts and their variations separately, recommends a diagnostic framing (hook, offer, page or audience stage), and proposes the next 1–3 tests each changing one meaningful element. Saves findings to ## Results review and updates ## Workflow progress without touching the approved package; explains that submission-level data cannot confirm COD profitability.",
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "PROPOSED CASE — pending human approval; do not execute yet. On approval, use sandbox copies of the live template/Base and a synthetic note with an approved ad package; no reviews exist for the product. User: 'Here is the note. My design skill will read ## Product-page brief and build the page sections. Make sure it has everything.'",
+      "expected_output": "Verifies and, where needed, completes ## Product-page brief with: target and note path, approved strategy in English, 1–3 prioritized customer questions, an outcome-reason-evidence message per question using only confirmed facts, suggested French headlines and support lines clearly labelled as suggestions, explicit absence of reviews with a factual demonstration alternative, confirmed commerce facts including COD payment and delivery terms, CTA guidance to the existing order form, and the customer-facing language. Leaves layout, visual direction and section selection to the design skill. Ensures the brief repeats the ad package's core promise so the click lands consistently; does not fabricate reviews, discounts, deadlines or statistics.",
+      "files": []
+    }
+  ]
+}
