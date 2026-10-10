@@ -1,6 +1,6 @@
 ---
 name: coolify-deploy
-description: Deploy applications on Coolify — a self-hosted PaaS (like Heroku/Vercel) that runs on your own VPS. Covers project setup, Dockerfile templates, health checks, database configuration, environment variables, CORS, persistent volumes, DNS, and debugging. Use when the user is deploying to Coolify, setting up a Coolify project, troubleshooting a broken deployment (502s, CORS errors, failing health checks, "connection refused" healthcheck logs, SIGSEGV crashes, EBADENGINE warnings), or mentions Coolify, self-hosting, VPS deployment, Traefik, or Docker-based PaaS.
+description: Deploy applications on Coolify — a self-hosted PaaS (like Heroku/Vercel) that runs on your own VPS. Covers project setup, Dockerfile templates, health checks, database configuration, environment variables, CORS, persistent volumes, DNS, and debugging. Use when the user is deploying to Coolify, setting up a Coolify project, troubleshooting a broken deployment (502s, CORS errors, failing health checks, "connection refused" healthcheck logs, SIGSEGV crashes, EBADENGINE warnings, apk add "DNS: transient error"/"no such package", node-gyp "find Python" failures from binding.gyp packages, npm ci --ignore-scripts), or mentions Coolify, self-hosting, VPS deployment, Traefik, or Docker-based PaaS.
 ---
 
 # Coolify Deployment
@@ -603,6 +603,8 @@ export DATABASE_URL
 
 > **Choosing the Node version:** before writing `FROM node:XX-alpine`, check the `engines.node` requirements of your native dependencies (better-sqlite3, bcrypt, sharp, canvas, sqlite3, etc.) and use the SAME version in ALL stages (deps/builder/runner). A mismatch produces `EBADENGINE` warnings, and native modules can SIGSEGV instead of failing cleanly — see "Build Worker SIGSEGV / EBADENGINE" under Debugging by Symptom.
 
+> **Build toolchain (`python3 make g++`): don't add it unless a dependency actually compiles.** better-sqlite3 v12+/v13, bcrypt, sharp and friends ship prebuilt musl binaries — verify with `npm pack <pkg>` + list the tarball for `prebuilds/` (and confirm no install script). If nothing needs compiling, skip the `apk add` line entirely: it's a needless network dependency that fails deploys on transient DNS errors. If a dep ships `prebuilds/` but `npm ci` still tries to compile it (binding.gyp), use `RUN npm ci --ignore-scripts` — see "gyp ERR! find Python" under Debugging by Symptom. Only keep the toolchain when a dependency genuinely compiles from source (no prebuilds for your platform/arch).
+
 ### Python Backend (FastAPI/Django/Flask)
 
 ```dockerfile
@@ -866,6 +868,23 @@ After deploying, verify every endpoint:
 - [ ] **Fix**: bump ALL Dockerfile stages (deps/builder/runner) to the Node version the dependency requires — e.g. better-sqlite3@13 requires node >=22 → `FROM node:22-alpine` everywhere
 - [ ] Quick audit: `grep '"node"' package-lock.json | sort -u` and cross-check each native dependency's `engines` field
 
+### `apk add` Fails — "DNS: transient error" → "no such package"
+- [ ] Log shows `WARNING: fetching https://dl-cdn.alpinelinux.org/.../APKINDEX.tar.gz: DNS: transient error (try again later)` followed by `ERROR: unable to select packages: python3 (no such package)` / `g++ (no such package)` / `make (no such package)`
+- [ ] This is a transient DNS failure on the build host, NOT missing packages — the package index never downloaded, so apk reports everything as missing
+- [ ] First question: is the toolchain needed at all? Modern native deps ship prebuilt binaries — better-sqlite3 v12+/v13 bundles `prebuilds/linuxmusl-x64.node` with no install script (loads at runtime), bcrypt/sharp ship musl prebuilds too. Cargo-culted `RUN apk add --no-cache python3 make g++` lines cause more failed deploys than they save
+- [ ] How to check: `npm pack <pkg>` then `tar -tzf <tgz> | grep prebuilds` and inspect the package's `scripts.install` — bundled prebuilds + no install script = no toolchain needed
+- [ ] If compilation is genuinely required, just retry the deploy (transient DNS usually clears) or harden: `for i in 1 2 3; do apk add --no-cache python3 make g++ && break; sleep 5; done`
+- [ ] After removing the apk line, watch for the follow-up failure below — `npm ci` may still auto-trigger node-gyp for packages that contain a `binding.gyp`
+
+### `npm ci` Fails — "gyp ERR! find Python" (node-gyp triggered by binding.gyp)
+- [ ] Log shows `npm error command sh -c node-gyp rebuild` + `gyp ERR! find Python ... You need to install the latest version of Python`
+- [ ] Surprising: the package (e.g. better-sqlite3 v13) has NO install script and works fine from its bundled prebuilds — but npm auto-runs `node-gyp rebuild` for ANY package containing a `binding.gyp` at its root, even though the compiled binary is never used
+- [ ] **Fix**: `RUN npm ci --ignore-scripts` in the Dockerfile
+- [ ] Only safe after auditing: your own package.json has no `prepare`/`preinstall`/`postinstall` scripts, and the lockfile's `hasInstallScript: true` packages are dev-only tooling not used in the image (e.g. `unrs-resolver` for eslint). Audit with `rg '"hasInstallScript": true' package-lock.json`
+- [ ] ⚠️ If a dependency genuinely compiles from source (no prebuilds for your platform), `--ignore-scripts` will break it at runtime — keep the apk toolchain instead
+- [ ] Verify with a runtime smoke test, not just the build: `node -e "const db=require('better-sqlite3')(':memory:');db.exec('create table t(a)')"` proves it loads from prebuilds; then run an endpoint that actually writes to the DB (e.g. POST an order) — a passing build alone proves nothing about the native module
+- [ ] For Next.js standalone runners, also confirm the prebuild made it into the traced output: `find .next/standalone -path '*better-sqlite3*' -name '*.node'` should list `linuxmusl-x64.node` for Alpine
+
 ### Prisma 7 `PrismaClientConstructorValidationError`
 - [ ] Error: "Using engine type 'client' requires either 'adapter' or 'accelerateUrl'"?
 - [ ] **Fix**: Install `@prisma/adapter-pg` and `pg`, configure PrismaClient with the adapter
@@ -963,3 +982,5 @@ After deploying, verify every endpoint:
 | `new Resend(undefined)` | `Missing API key` crash | Initialize lazily with null check |
 | `postgres-array` stub in standalone | `Cannot find module` at runtime | Copy full package from builder stage |
 | `*.md` in .dockerignore | Important docs excluded | Be specific, don't blanket exclude |
+| `apk add python3 make g++` when deps ship prebuilds | `DNS: transient error` → `no such package` | Drop the apk line if the native dep bundles prebuilds; else retry/harden loop |
+| `npm ci` auto-runs node-gyp for `binding.gyp` packages | `gyp ERR! find Python` | `npm ci --ignore-scripts` after lockfile audit; keep toolchain if a dep truly compiles |
