@@ -1,17 +1,18 @@
 ---
 name: morocco-cod-marketing
 description: >-
-  Build fast, emotionally grounded Facebook and Instagram ad packages plus a
-  product-page marketing brief for Moroccan cash-on-delivery ecommerce, one
+  Build emotionally grounded Meta ad packages plus a product-page marketing
+  brief for Moroccan cash-on-delivery ecommerce, one
   product at a time. Use whenever the user wants product marketing strategy,
   ad planning, French or Darija ad copy, static or video ad concepts, hooks,
   offers, or a product-page brief; also when the user provides a
   product image, URL or description and asks how to sell it, or asks to
   review ad results and plan the next tests. Follows a three-checkpoint
   workflow: confirm essentials with a short research pass, approve one
-  recommended strategy direction, then deliver six static ads, three video
-  scripts and a page brief. Saves the approved package into Obsidian product
-  notes under MARKETING_VAULT with safe targeted patches. Assumes the
+  recommended strategy direction, then deliver six static ads, optional video
+  scripts and a page brief with four gallery prompts. Saves the approved
+  package into Obsidian product notes under MARKETING_VAULT with safe targeted
+  patches. Assumes the
   Moroccan COD funnel of ad, product page, order form, confirmation call,
   delivery and payment. Keeps strategy in the user's language and
   customer-facing copy in French by default; supports resuming or revising
@@ -57,7 +58,8 @@ description: >-
   approved customer-facing text embedded.
 - Placement: Meta (Facebook and Instagram).
 - Ad package: six static ads (three concepts × two purposeful variations),
-  three video scripts (one per concept), one product-page marketing brief.
+  three video scripts when requested (one per concept), and one product-page
+  marketing brief with four gallery prompts.
 
 See [Ad package](references/ad-package.md) for formats and templates.
 
@@ -87,9 +89,11 @@ then move. Do not rehearse late-stage decisions here.
    versus revise. Preserve manual edits and legacy analysis.
 3. Confirm the essentials: product identity, confirmed features, current
    price and offer terms, delivery and payment policies, available assets,
-   and the customer-facing language. Apply the defaults silently when the
-   user has not asked otherwise; state them in the summary so the user can
-   correct them.
+   and the customer-facing language. Always ask explicitly whether video ads
+   are needed (yes or no) in this checkpoint. If yes, include the standard
+   three video scripts; if no, omit them completely. Apply the other defaults
+   silently when the user has not asked otherwise; state them in the summary
+   so the user can correct them.
 4. Do a short, focused research pass when browsing is available: the
    product page (identification and claimed features), a few customer
    review or Q&A snippets, and the strongest visible competitor ads or
@@ -117,6 +121,10 @@ as a whole, instead of walking through catalog screens.
 
 Present one package covering:
 
+- **French marketing name:** recommend one attractive, natural French product
+  name with a short rationale. Treat it as a customer-facing marketing name,
+  not a replacement for the factual catalog identity, and use it only after
+  approval.
 - **Audience:** a concrete group in a recognizable situation, plus the
   practical problem the product solves for them.
 - **Emotional meaning:** what the friction may mean to them and the
@@ -155,15 +163,24 @@ Produce, in one go:
 1. **Six static ads** — three concepts (default families: the lived problem
    and its solution; the main benefit demonstrated; the strongest objection
    answered), each with two variations that change one meaningful element.
-2. **Three video scripts** — one per concept, 9:16, 20–30 seconds, hook in
-   the first 2–3 seconds.
+   Give every variation its own Meta primary text, headline and description,
+   clearly labelled with the same concept and variation name as its prompt.
+2. **Three video scripts, only when requested at Checkpoint 1** — one per
+   concept, 9:16, 20–30 seconds, hook in the first 2–3 seconds. Give each
+   requested video its own Meta primary text, headline and description. If
+   the user answered no, do not generate video concepts or scripts.
 3. **Product-page marketing brief** — the message, evidence and CTA the
    page must carry, for the user's separate design skill; see
    [Product-page handoff](references/page-handoff.md).
+4. **Four product-gallery prompts** — production-ready prompts with distinct
+   purposes: clean hero, realistic use, feature close-up and aspirational
+   lifestyle. Show complementary attractive product positions rather than
+   repeating one composition.
 
 Each creative must trace the approved chain (audience → situation → pain →
 meaning → transformation → copy → creative → hook) and include exact
-customer-facing text in the approved language. Follow
+customer-facing text in the approved language. Keep Meta primary text,
+headline and description separate from on-image text. Follow
 [Ad package](references/ad-package.md) for the full per-format template.
 
 Present the package for review. Refine only on the user's request; on

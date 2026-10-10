@@ -5,8 +5,9 @@
 - Six static ads: three concepts, two variations per concept; each
   variation changes exactly one meaningful element (hook/headline angle or
   visual approach) so the comparison is useful later.
-- Three video scripts: one per concept.
-- One product-page brief (see `page-handoff.md`).
+- Three video scripts, one per concept, only when the user requested video at
+  Checkpoint 1. Omit video concepts and scripts when the answer was no.
+- One product-page brief with four gallery prompts (see `page-handoff.md`).
 
 Default concept families, adapted to each product:
 
@@ -23,7 +24,8 @@ brief can repeat it consistently.
 
 Fill all of:
 
-1. Concept and variation name, and the one changed element.
+1. Concept and variation name, and the one changed element. Use this same
+   label for the prompt and its Meta copy so campaign results stay traceable.
 2. Objective and audience moment.
 3. Hook: the first line the eye meets.
 4. Visual direction: subject and product placement, environment and
@@ -36,7 +38,11 @@ Fill all of:
    visual and copy trace the approved direction.
 7. Production prompt in English embedding the exact customer-facing text,
    directly usable in the user's image tool.
-8. Negative constraints: preserve the real product's appearance; do not
+8. Meta ad copy, separate from on-image text:
+   - Primary text: the persuasive message above the ad.
+   - Headline: a short benefit-led line below the creative.
+   - Description: one concise supporting detail.
+9. Negative constraints: preserve the real product's appearance; do not
    invent colors, logos, certifications, offers, testimonials,
    statistics, prices or comparisons.
 
@@ -51,6 +57,8 @@ Fill all of:
 5. Product fidelity notes and negative constraints.
 6. Production instructions (shooting or AI generation) in English, with
    the exact customer-language on-screen text and voiceover embedded.
+7. Meta primary text, headline and description, separate from on-screen text
+   and labelled with the same concept name as the script.
 
 ## Copy guidance
 
@@ -61,6 +69,9 @@ Fill all of:
   No invented scarcity, discounts or guarantees.
 - On-image text stays short: headline roughly eight words or fewer,
   support line roughly twelve or fewer, so it survives mobile crops.
+- Meta primary text, headline and description are publishing fields, not
+  instructions to render that copy inside the image or video. Keep each set
+  aligned with its ad's single promise and confirmed facts.
 - For Darija (Arabic script) on request: write the copy in Darija and
   note the script direction in the production prompt.
 
@@ -72,4 +83,6 @@ Fill all of:
 - Each variation differs in exactly one meaningful element.
 - Prompts and scripts are paste-ready, with the exact customer-facing
   text embedded.
+- Every static variation and each requested video has a separately labelled
+  Meta primary text, headline and description.
 - No generation, purchase or launch is performed by the prompt itself.
