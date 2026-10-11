@@ -2,12 +2,17 @@
 
 ## Package shape
 
-- Six static ads: three concepts, two variations per concept; each
-  variation changes exactly one meaningful element (hook/headline angle or
-  visual approach) so the comparison is useful later.
+- Standard scope: six static ads, three concepts and two variations per
+  concept. Variation A is the baseline; Variation B differs from A in exactly
+  one named meaningful element (hook/headline angle or visual approach) while
+  all other material elements stay constant.
 - Three video scripts, one per concept, only when the user requested video at
   Checkpoint 1. Omit video concepts and scripts when the answer was no.
 - One product-page brief with four gallery prompts (see `page-handoff.md`).
+
+Change this standard scope only when the user explicitly approves a different
+production scope. Package approval remains one gate even if the package is
+presented in compact blocks.
 
 Default concept families, adapted to each product:
 
@@ -34,8 +39,9 @@ Fill all of:
 5. Exact on-image text in the approved customer language (French by
    default): headline, one support line, CTA. Include the confirmed COD
    trust line only when confirmed, e.g. "Paiement à la livraison".
-6. Message map: situation → friction → meaning → transformation, so the
-   visual and copy trace the approved direction.
+6. Message map: trace every step of the canonical strategy chain from
+   `SKILL.md`, so the visual, proof and copy remain tied to the approved
+   direction.
 7. Production prompt in English embedding the exact customer-facing text,
    directly usable in the user's image tool.
 8. Meta ad copy, separate from on-image text:
@@ -52,8 +58,9 @@ Fill all of:
 2. Duration 20–30 seconds, 9:16, hook within the first 2–3 seconds.
 3. Scene table: Scene | Time | Visual | On-screen text (customer
    language) | Voiceover (customer language) | Sound.
-4. Final CTA scene: the order action (select/order button, confirmation
-   call cue), COD reassurance only when confirmed.
+4. Final CTA scene: the order action (select/order button and the actual
+   confirmed next step), COD reassurance only when confirmed. Mention a
+   confirmation call only when that is the merchant's real process.
 5. Product fidelity notes and negative constraints.
 6. Production instructions (shooting or AI generation) in English, with
    the exact customer-language on-screen text and voiceover embedded.
@@ -77,8 +84,11 @@ Fill all of:
 
 ## Review check before presenting
 
-- Each ad traces the approved chain.
-- Every claim maps to a confirmed fact or a recorded research quote.
+- Each ad traces the canonical strategy chain from `SKILL.md`.
+- Every product claim maps to an owner-confirmed fact, the product's own
+  traceable source, fair direct demonstration, applicable technical evidence,
+  or a genuine own-customer review. Competitor and category research may
+  inform language or hypotheses but cannot prove this product's claims.
 - Every CTA and trust line is real.
 - Each variation differs in exactly one meaningful element.
 - Prompts and scripts are paste-ready, with the exact customer-facing

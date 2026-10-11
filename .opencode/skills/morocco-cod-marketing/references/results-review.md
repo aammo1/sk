@@ -3,13 +3,16 @@
 Triggered when the user asks to review campaign results or plan the next
 ads. Accept screenshots, spreadsheets or pasted numbers; ask for missing
 pieces only when a decision depends on them. Never invent missing data.
+Require the user to identify the target product note; never infer it from ad
+names alone. Analyze and present findings first. Save only after the user
+approves the conclusions and proposed next tests.
 
 ## Which numbers matter (COD priority)
 
 Judge an ad or concept in this order:
 
 1. Delivered/paid orders per ad or concept.
-2. Confirmed orders (after the confirmation call).
+2. Confirmed orders (after the merchant's actual confirmation process).
 3. Submitted order forms.
 4. Click-outs (CTR) and costs.
 
@@ -27,10 +30,12 @@ otherwise label conclusions preliminary.
 - Recommend keep (performing well), test (promising, still small data),
   hold or stop, against thresholds the user accepts; explain ambiguity
   when the data is not decisive.
-- Diagnose the failing stage from the ad package's message map: hook and
-  headline, offer framing, product page, or audience. A low
-  submit → confirm rate points at the page or offer; a low confirm →
-  deliver rate points at the confirmation call or delivery promise.
+- Diagnose cautiously from the ad package's message map: hook and headline,
+  offer framing, product page, audience or operations. A low submit → confirm
+  rate may indicate expectation, offer or confirmation-process friction; a
+  low confirm → deliver rate may indicate expectation mismatch, address
+  quality, fulfillment, delivery timing or buyer commitment. Do not infer
+  causality from one metric.
 
 ## Next batch planning
 
@@ -41,9 +46,10 @@ Recommend the next 1–3 tests, each changing one meaningful element:
 - An offer-framing change, using only approved terms.
 - An audience or placement change.
 
-Save conclusions in `## Results review` and update
+After approval, save conclusions in `## Results review` and update
 `## Workflow progress`. If results suggest revising the strategy, mark the
-affected downstream sections `needs-review` and get replacements approved.
+affected downstream checkpoint statuses `needs-review` in that authoritative
+progress section, retain existing content, and get replacements approved.
 
 Treat measured results as evidence about a campaign angle — useful for the
 next test — not as proof of the underlying psychology. A winning ad

@@ -25,6 +25,20 @@ The library is most useful when a concept is strategically sound but visually
 ordinary, when three concepts feel too similar, or when a proven direction
 needs fresh executions without changing its core promise.
 
+## Quick decision index
+
+Read only the sections needed for the current problem:
+
+- Generic or repetitive execution: [Creative format library](#creative-format-library).
+- Weak persuasive route: [Persuasive messaging strategies](#persuasive-messaging-strategies).
+- Weak opening: [Hooks and proof devices](#hooks-and-proof-devices).
+- Unclear motivation: [Desire and identity lenses](#desire-and-identity-lenses).
+- Poor local fit: [Morocco COD adaptation](#morocco-cod-adaptation).
+- Static construction: [Static-ad construction](#static-ad-construction).
+- Video construction: [Video-ad construction](#video-ad-construction).
+- Performance diagnosis: [Testing and diagnosis](#testing-and-diagnosis).
+- Trust or policy concern: [Failure modes and safeguards](#failure-modes-and-safeguards).
+
 ## Contents
 
 1. [The three-layer model](#the-three-layer-model)
@@ -589,7 +603,10 @@ routines. Show what becomes calmer rather than using generic wellness imagery.
 
 ### Additional commercial desires
 
-The source taxonomy is not complete. Also consider these when supported:
+The source taxonomy is not complete. The lenses below are narrative
+inspiration, not automatically valid vault labels. When one is useful, map it
+to an exact approved live catalog label or keep it only in the written
+reasoning; never invent a new property value. Consider these when supported:
 
 - **Convenience:** fewer steps, easier access or less repeated effort.
 - **Economy:** better use of money, lower waste or clear value.

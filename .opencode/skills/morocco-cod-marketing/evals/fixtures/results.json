@@ -1,0 +1,10 @@
+{
+  "currency": "MAD",
+  "reporting_window": "2026-09-01 to 2026-09-14",
+  "ads": [
+    {"concept": "Problem", "variation": "A", "spend": 600, "clicks": 300, "submits": 30, "confirmed": 18, "delivered": 12, "revenue": 1788, "confirmed_costs": 1320},
+    {"concept": "Problem", "variation": "B", "spend": 450, "clicks": 180, "submits": 24, "confirmed": 12, "delivered": 6, "revenue": 894, "confirmed_costs": 810},
+    {"concept": "Benefit", "variation": "A", "spend": 500, "clicks": 200, "submits": 20, "confirmed": 14, "delivered": 10, "revenue": 1490, "confirmed_costs": 1100},
+    {"concept": "Benefit", "variation": "B", "spend": 250, "clicks": 100, "submits": 10, "confirmed": null, "delivered": null, "revenue": null, "confirmed_costs": null}
+  ]
+}

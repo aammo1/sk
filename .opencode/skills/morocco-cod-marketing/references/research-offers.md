@@ -2,23 +2,26 @@
 
 ## The focused pass (Checkpoint 1)
 
-A short, automatic research pass when browsing is available — two or three
-focused searches, not an exhaustive study. Deeper research happens only on
-explicit request. Purpose: ground the strategy in real customer language
-instead of invented pain points.
+A short, automatic research pass when browsing is available—usually two or
+three focused searches, not an exhaustive study. Deeper research happens only
+on explicit request. Fetch a supplied URL when URL access exists; discovery
+research requires search access. Purpose: ground the strategy in real customer
+language instead of invented pain points.
 
 Look at:
 
 - The product page: identification and claimed features.
 - A few customer reviews or Q&A snippets.
-- The strongest visible competitor ads or pages.
+- Relevant visible competitor ads or pages. Visibility is not evidence that
+  an ad performed.
 
 Extract:
 
 - Customer wording: how buyers describe the problem, benefit and moment.
 - Objections: price, delivery, trust, need, quality doubts.
 - Competing promises: what else already claims this audience's attention.
-- Proof elements that exist publicly (never copied as fake social proof).
+- Public evidence candidates, classified by whether they apply to this exact
+  product or only reveal category language.
 
 ## Recording
 
@@ -38,6 +41,13 @@ Extract:
 - Findings may inform the recommendation but never silently replace an
   already approved strategy.
 - Never fabricate research when nothing was found.
+- Competitor reviews, marketplace comments and category discussions may inform
+  customer wording, objections and hypotheses. They never substantiate a claim
+  about the merchant's product.
+- Product claims may use owner-confirmed facts, the product's own traceable
+  source, fair direct demonstration, applicable technical evidence, or a
+  genuine own-customer review with appropriate permission. State the evidence
+  class rather than upgrading public research into product proof.
 
 ## Offers: confirmed terms as the baseline
 

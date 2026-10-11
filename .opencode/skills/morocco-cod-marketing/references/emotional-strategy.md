@@ -7,8 +7,8 @@ the friction may mean to this audience, not what everyone secretly feels.
 Use "may", "could" and "hypothesis" for emotional interpretation, even
 after the direction is approved.
 
-Walk the chain: situation → friction → meaning → desire/identity →
-transformation → angle → emotion → copy → creative → hook → ad.
+Use the canonical strategy chain from `SKILL.md`; do not shorten, rename or
+reorder its steps here.
 
 Features explain the mechanism supporting the transformation; they are not
 the whole pitch. Explore relief, belonging, status, control, comfort and
@@ -27,10 +27,11 @@ psychology into fact.
 
 Save the approved direction using exact labels from the live catalogs:
 human desires (e.g. `Tranquility`, `Order`, `Social contact`), emotions
-(e.g. `40 - comfort`), copy techniques (e.g. `story`, `questions`),
-creative techniques and hooks. Match labels to the narrative, not the
-product type. Detailed reasoning goes in the body; property values stay
-exact catalog labels.
+(e.g. `40 - comfort`) and copy techniques (e.g. `story`,
+`50 - questions`). Match labels to the narrative, not the product type.
+Checkpoint 2 approval covers these direction labels. Creative-technique and
+hook labels are selected only with the Checkpoint 3 package. Detailed
+reasoning goes in the body; property values stay exact catalog labels.
 
 ## Worked example 1: organizer — calmer departures
 

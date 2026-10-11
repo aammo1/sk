@@ -1,0 +1,27 @@
+filters:
+  and:
+    - file.inFolder("01 Products")
+properties:
+  formula.Product_image:
+    displayName: Product image
+views:
+  - type: notion-table
+    name: Products Table
+    order:
+      - 🛫 find_product_methods
+      - 🛫 categories
+      - 🛫 assets
+      - ✈️Product_Potentials
+      - ✈️Reputation_Reviews_Mining
+      - ✈️Concurrences_Analyses
+      - 🎡Problems_defaut_pain_point
+      - 🎡solution_feature_benifits_special_Competitive_advantage
+      - 🎡targeted_audiance_pain_point_benifits
+      - 🚂human_desir_Angle_marketing
+      - 🚂emotion_angle
+      - 🚂Copy_Techniques
+      - 🌟Creative_Typee_Techniques
+      - 🌟Hook_Type
+      - 🌟Action_plan
+      - 📝NOTES
+      - cover
