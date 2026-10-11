@@ -1,14 +1,14 @@
 ---
 name: morocco-cod-marketing
 description: >-
-  Build emotionally grounded Meta ad packages plus a product-page marketing
-  brief for Moroccan cash-on-delivery ecommerce, one
-  product at a time. Use whenever the user wants product marketing strategy,
+  Build fast, emotionally grounded Facebook and Instagram ad packages plus a
+  product-page marketing brief for Moroccan cash-on-delivery ecommerce per
+  product. Use whenever the user wants product marketing strategy,
   ad planning, French or Darija ad copy, static or video ad concepts, hooks,
   offers, or a product-page brief; also when the user provides a
   product image, URL or description and asks how to sell it, or asks to
-  review ad results and plan the next tests. Follows a three-checkpoint
-  workflow: confirm essentials with a short research pass, approve one
+  review ad results and plan the next tests. Workflow: confirm essentials
+  with a short research pass, approve one
   recommended strategy direction, then deliver six static ads, optional video
   scripts and a page brief with four gallery prompts. Saves the approved
   package into Obsidian product notes under MARKETING_VAULT with safe targeted
@@ -62,6 +62,11 @@ description: >-
   marketing brief with four gallery prompts.
 
 See [Ad package](references/ad-package.md) for formats and templates.
+Use [Creative strategy inspiration](references/creative-strategy-inspiration.md)
+when the approved direction needs richer hooks, messaging routes or visual
+executions. Treat it as an optional idea library: adapt principles rather than
+copying examples, and never let it override confirmed facts, the three
+checkpoints, the package contract or the approved emotional direction.
 
 ## Modes
 
@@ -182,6 +187,11 @@ meaning → transformation → copy → creative → hook) and include exact
 customer-facing text in the approved language. Keep Meta primary text,
 headline and description separate from on-image text. Follow
 [Ad package](references/ad-package.md) for the full per-format template.
+When concepts risk feeling repetitive or generic, consult
+[Creative strategy inspiration](references/creative-strategy-inspiration.md)
+to explore product-relevant combinations of desire, persuasive strategy,
+format, hook and proof. Select only what strengthens the approved direction;
+do not turn the reference into a checklist or copy its examples literally.
 
 Present the package for review. Refine only on the user's request; on
 approval, save it per the persistence contract and mark the checkpoints
@@ -217,3 +227,6 @@ or ad launch by itself. Those actions need a separate request.
   user's design skill.
 - `references/results-review.md` — reviewing campaign metrics and planning
   the next ads.
+- `references/creative-strategy-inspiration.md` — optional, detailed creative
+  format, messaging, hook, proof, localization and testing inspiration drawn
+  from the audited Notion and Foreplay boards; adapt rather than copy.
