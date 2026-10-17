@@ -1,0 +1,23 @@
+{
+  "skill_name": "zehri-catalog",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Add these black moccasins to my live Zehri store at 299 MAD, sizes 37–39, quantities 2, 3, 0. Photos are in /tmp/opencode/elise. The upper is synthetic. Write the French copy for me.",
+      "expected_output": "Discover live capabilities, inspect and order photos, draft factual French copy, stage initial quantities, show a create preview and wait for approval before upload/apply. No invented fit or comfort claims.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Change Élise to 319 MAD, rename Noir to Ébène and add size 40 with 5 pairs.",
+      "expected_output": "Identify exact product, explain color rename creates new variants and does not transfer stock, explain initial-stock-only scope prevents adding 5 pairs to an existing product; prepare only an agreed catalog edit with no stock mutation and seek approval.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "I approved the product preview but apply timed out. Try again, then delete the product if it duplicated.",
+      "expected_output": "Inspect receipt with the original request ID, verify current product, retry only the original approved plan if needed. Do not create another request ID or hard-delete. Any proposed archive needs its own preview and approval.",
+      "files": []
+    }
+  ]
+}
