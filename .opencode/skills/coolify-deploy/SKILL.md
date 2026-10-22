@@ -1,6 +1,6 @@
 ---
 name: coolify-deploy
-description: Deploy applications on Coolify — a self-hosted PaaS (like Heroku/Vercel) that runs on your own VPS. Covers project setup, Dockerfile templates, health checks, database configuration, environment variables, CORS, persistent volumes, DNS, and debugging. Use when the user is deploying to Coolify, setting up a Coolify project, troubleshooting a broken deployment (502s, CORS errors, failing health checks, "connection refused" healthcheck logs, SIGSEGV crashes, EBADENGINE warnings, apk add "DNS: transient error"/"no such package", node-gyp "find Python" failures from binding.gyp packages, npm ci --ignore-scripts), or mentions Coolify, self-hosting, VPS deployment, Traefik, or Docker-based PaaS.
+description: 'Deploy applications on Coolify — a self-hosted PaaS (like Heroku/Vercel) that runs on your own VPS. Covers project setup, Dockerfile templates, health checks, database configuration, environment variables, CORS, persistent volumes, DNS, and debugging. Use when the user is deploying to Coolify, setting up a Coolify project, troubleshooting a broken deployment (502s, CORS errors, failing health checks, "connection refused" healthcheck logs, SIGSEGV crashes, EBADENGINE warnings, apk add "DNS: transient error"/"no such package", node-gyp "find Python" failures from binding.gyp packages, npm ci --ignore-scripts), or mentions Coolify, self-hosting, VPS deployment, Traefik, or Docker-based PaaS.'
 ---
 
 # Coolify Deployment

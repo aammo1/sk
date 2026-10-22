@@ -1,11 +1,10 @@
 ---
-name: checkpoint
+name: git-checkpoint
 description: >
   Create a comprehensive checkpoint commit with detailed analysis of all changes. Use this skill
-  when the user says "checkpoint", "commit everything", "save my progress", "create a commit",
-  or wants to stage and commit all current changes with a well-crafted message. Also use when
-  the user says "/checkpoint" or asks to snapshot current work. This skill stages all changes
-  and creates a descriptive commit — it does not push.
+  when the user says "git checkpoint", "commit everything", "save my progress to git", "create a commit",
+  or "/git-checkpoint". It stages all changes and creates a descriptive commit; it does not push.
+  Not for saving notes to the memory vault.
 ---
 
 # Checkpoint Commit
