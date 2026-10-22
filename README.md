@@ -5,31 +5,27 @@ Every skill I use, in the `SKILL.md` format shared by DSH (DeepSeek Harness), Cl
 ```
 .opencode/skills/<name>/SKILL.md    loadable skills
 .opencode/archive/                  reference material, not loadable
-install.sh                          link the skills into ~/.agents/skills
 ```
+
+The `skills` CLI finds a `SKILL.md` anywhere in the repo, so the `.opencode/skills` directory name is cosmetic, not a requirement.
 
 ## Install
 
+Use the [`skills` CLI](https://github.com/vercel-labs/skills) (Node 22.20+). It prompts for which skills and which agents, then records what it installed in `skills-lock.json` so it can update or remove them later.
+
 ```sh
-git clone https://github.com/aammo1/sk ~/Skills/sk
-~/Skills/sk/install.sh --list                     # what can I install?
-~/Skills/sk/install.sh seo-optimizer nextjs       # install just these
+npx skills add aammo1/sk                     # choose skills and agents
+npx skills add aammo1/sk -g                  # global, available in every project
+npx skills add aammo1/sk --skill coolify-deploy -a claude-code   # non-interactive
+
+npx skills list                              # what is installed
+npx skills check                             # update anything changed upstream
+npx skills remove <skill>                    # uninstall
 ```
 
-`install.sh` symlinks skills into `~/.agents/skills`, the one root all three agents read.
+Select an agent that targets `~/.agents/skills/` when installing globally (Codex, Cline, Universal, or any of the others that share that path). That is the one root DSH reads, so it is what makes a skill visible to DSH, Claude Code and OpenCode at the same time.
 
-| Usage | Effect |
-|---|---|
-| `./install.sh` | install every skill |
-| `./install.sh name [name...]` | install only the named skills |
-| `./install.sh --all` | install every skill, explicitly |
-| `./install.sh --list` | list installable names, install nothing |
-| `--copy` | copy instead of symlinking |
-| `--force` | replace an existing real directory (default: skip and keep it) |
-| `--dest=DIR` | install elsewhere |
-| `AGENTS_SKILLS=DIR` | same as `--dest` |
-
-Names are validated before anything is touched: an unknown name exits 2 and prints the available list. A selective run only touches the skills you named, so it can top up an existing root without disturbing anything already installed.
+`npx skills check` is not a dry run: it applies the updates it finds.
 
 A fresh Omarchy machine ends up with the repo's skills plus `diagnose-crash` and `omarchy`, which live in `/usr/share/omarchy/default/agents/skills` and are intentionally not duplicated here.
 
@@ -44,7 +40,7 @@ A fresh Omarchy machine ends up with the repo's skills plus `diagnose-crash` and
 | `~/.claude/skills` | no | yes | yes |
 | `~/.config/opencode/skills` | no | no | yes |
 
-DSH does **not** read `.opencode/skills` or `~/.claude/skills`, so cloning this repo is not enough on its own. Run `install.sh`.
+DSH does **not** read `.opencode/skills` or `~/.claude/skills`, so cloning this repo is not enough on its own. Install through the `skills` CLI so the files land in a root your agent actually reads.
 
 ## Authoring rules
 
