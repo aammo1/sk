@@ -12,10 +12,24 @@ install.sh                          link the skills into ~/.agents/skills
 
 ```sh
 git clone https://github.com/aammo1/sk ~/Skills/sk
-~/Skills/sk/install.sh
+~/Skills/sk/install.sh --list                     # what can I install?
+~/Skills/sk/install.sh seo-optimizer nextjs       # install just these
 ```
 
-`install.sh` symlinks each skill into `~/.agents/skills`, the one root all three agents read. Flags: `--copy`, `--force`, `--dest=DIR`, or `AGENTS_SKILLS=DIR`.
+`install.sh` symlinks skills into `~/.agents/skills`, the one root all three agents read.
+
+| Usage | Effect |
+|---|---|
+| `./install.sh` | install every skill |
+| `./install.sh name [name...]` | install only the named skills |
+| `./install.sh --all` | install every skill, explicitly |
+| `./install.sh --list` | list installable names, install nothing |
+| `--copy` | copy instead of symlinking |
+| `--force` | replace an existing real directory (default: skip and keep it) |
+| `--dest=DIR` | install elsewhere |
+| `AGENTS_SKILLS=DIR` | same as `--dest` |
+
+Names are validated before anything is touched: an unknown name exits 2 and prints the available list. A selective run only touches the skills you named, so it can top up an existing root without disturbing anything already installed.
 
 A fresh Omarchy machine ends up with the repo's skills plus `diagnose-crash` and `omarchy`, which live in `/usr/share/omarchy/default/agents/skills` and are intentionally not duplicated here.
 
