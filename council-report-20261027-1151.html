@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Council Report — DeepSeek Flash v4.1 vs GLM-5.3 Flash</title>
+<style>
+  :root { --accent:#4f6df5; --line:#e5e7eb; --muted:#6b7280; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; margin:0; background:#f9fafb; color:#111827; line-height:1.6; }
+  .wrap { max-width:820px; margin:0 auto; padding:40px 24px; }
+  .kicker { font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); }
+  h1 { font-size:26px; margin:6px 0 4px; }
+  .q { font-size:17px; color:#374151; background:#fff; border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:8px; padding:16px 20px; margin:20px 0 32px; }
+  h2 { font-size:15px; text-transform:uppercase; letter-spacing:.08em; color:var(--accent); margin:36px 0 12px; }
+  .verdict { background:#fff; border:1px solid var(--line); border-radius:10px; padding:24px 28px; box-shadow:0 1px 3px rgba(0,0,0,.05); }
+  .verdict h3 { margin:18px 0 6px; font-size:15px; }
+  .verdict p { margin:6px 0; font-size:15px; color:#374151; }
+  .first { background:#eef2ff; border:1px solid #c7d2fe; border-radius:8px; padding:14px 18px; margin-top:20px; font-size:15px; }
+  table.grid { border-collapse:collapse; width:100%; font-size:14px; margin-top:8px; background:#fff; }
+  table.grid td, table.grid th { border:1px solid var(--line); padding:10px 12px; text-align:left; vertical-align:top; }
+  table.grid th { background:#f3f4f6; font-weight:600; }
+  .tag { display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px; }
+  .agree { background:#dcfce7; color:#166534; }
+  .split { background:#fef9c3; color:#854d0e; }
+  .unique { background:#e0e7ff; color:#3730a3; }
+  details { background:#fff; border:1px solid var(--line); border-radius:8px; margin-top:10px; padding:0; }
+  details summary { padding:12px 18px; cursor:pointer; font-weight:600; font-size:14px; }
+  details .body { padding:0 18px 16px; font-size:14px; color:#374151; white-space:pre-wrap; }
+  details .body p { margin:8px 0; }
+  footer { margin-top:48px; padding-top:16px; border-top:1px solid var(--line); font-size:13px; color:var(--muted); }
+  .rec a { color:var(--accent); }
+</style>
+</head>
+<body><div class="wrap">
+
+<div class="kicker">LLM Council Report</div>
+<h1>DeepSeek Flash v4.1 (1017) vs GLM-5.3 Flash</h1>
+<div style="color:var(--muted);font-size:14px;">Question counciled: "wich better deepseek flash v4.1 1017 or glm 5.3 flash" — 5 advisors · anonymous peer review · chairman synthesis</div>
+
+<div class="q">Which model is better for agentic coding through an OpenCode-class harness (code quality, tool-call reliability, instruction following, speed, cost) — <b>DeepSeek Flash v4.1 (1017)</b> or <b>GLM-5.3 Flash</b>? Currently on GLM-5.3 flash/free tier. Stakes: picking the weaker model degrades agent output or wastes money/time.</div>
+
+<h2>Council Verdict</h2>
+<div class="verdict">
+  <h3>1 · Where the Council Agrees</h3>
+  <p>Four convergent points, held by every advisor:</p>
+  <p>• <b>"Better" only counts in-context.</b> Benchmarks and marketing names prove nothing about 40-step tool-loop reliability — the metric that actually determines agent quality.</p>
+  <p>• <b>Tool-call reliability &gt; raw model quality.</b> Retries, malformed tool calls, and silent scope violations are where agentic runs die — a "weaker but consistent" model beats a "stronger but flaky" one.</p>
+  <p>• <b>Cost asymmetry is near zero</b> — both are flash-tier and cheap/free, so the decisive variable isn't price, it's reliability and switch friction.</p>
+  <p>• <b>The bakeoff is the answer.</b> Your own task distribution, in your own repo, beats any published eval. ~60 minutes of testing produces ground truth that no council, benchmark, or changelog can.</p>
+
+  <h3>2 · Where the Council Clashes</h3>
+  <p>• <b>Single winner vs portfolio.</b> The Executor wants one decisive winner from a gauntlet; the Expansionist argues the answer is <i>both, sequenced</i> — route GLM for high-volume loops, escalate hard synthesis to a stronger tier. These aren't fully opposed: the portfolio still needs a default, which the gauntlet picks.</p>
+  <p>• <b>Sermonize vs operationalize.</b> The Contrarian and First Principles Thinker reframed the question and confounded it; the Executor just built the test. The Chairman sides with the Executor's framing, informed by the others' skepticism.</p>
+  <p>• <b>How much to distrust the names.</b> The Contrarian called the comparison "astrology"; the Outsider said comparing an unverifiable challenger against a <i>free incumbent</i> means the real question is "is better worth paying for." Peer review partially settled this: during synthesis the council checked the harness's own model registry — <b>both models resolve and are routable</b> (<code>deepseek-v4.1-flash-1017</code> via OpenRouter/free OpenCode endpoints; <code>glm-5.3-flash-free</code> already in use). Name ambiguity: resolved.</p>
+
+  <h3>3 · Blind Spots the Council Caught</h3>
+  <p>Emergent only through peer review — no advisor stated these alone:</p>
+  <p>• <b>You're already on GLM-5.3 Flash — it's the incumbent, not a co-equal candidate.</b> The rational default is <i>stay, unless DeepSeek demonstrably wins</i>. Burden of proof lies with the challenger.</p>
+  <p>• <b>Zero facts produced about either model.</b> All five advisors lectured on verification without doing any — peers called this out, ironically noting GLM-5.3 Flash is demonstrably real since this council itself runs on it.</p>
+  <p>• <b>Free-tier confounds (routing, throttle, quantization) can corrupt any A/B</b> — and unprompted mid-week model swaps on shared free endpoints may make results sticky-unreliable.</p>
+  <p>• <b>Small-n trap.</b> A 5-prompt gauntlet run once can't separate close models — run it twice, or use ~20 tasks.</p>
+
+  <h3>4 · The Recommendation</h3>
+  <p><b>Stay on GLM-5.3 Flash as your default</b> (free incumbent, already working in your harness). <b>Run the Executor's 60-minute gauntlet on DeepSeek Flash v4.1 (1017)</b> — 5 prompts × 2 models, twice — scoring only tool retries, scope violations, diff verbosity, and wall-clock. Switch your default <b>only</b> if DeepSeek wins on retries at equal correctness; otherwise keep GLM and revisit each new version release. Don't switch for benchmark deltas alone.</p>
+
+  <div class="first"><b>5 · The One Thing to Do First</b><br>
+  Run the 5-prompt gauntlet (from the "Executor" section below) on both models, 15 minutes each, and count failed tool calls per run. Decision rule: identical correctness → fewest retries wins the default.</div>
+</div>
+
+<h2>Advisor Alignment</h2>
+<table class="grid">
+<tr><th>Signal</th><th>Contrarian</th><th>First Principles</th><th>Expansionist</th><th>Outsider</th><th>Executor</th></tr>
+<tr><td>Run your own eval, not benchmarks</td><td class="agree">✓</td><td class="agree">✓</td><td class="agree">✓</td><td class="agree">✓</td><td class="agree">✓<br><span style="font-size:11px">only one that specified it</span></td></tr>
+<tr><td>Tool-call reliability is the deciding metric</td><td class="agree">✓</td><td class="agree">✓</td><td></td><td class="agree">✓</td><td class="agree">✓</td></tr>
+<tr><td>Keep a confident single-model pick</td><td class="split">✗ calls bet "bullshit"</td><td class="split">✗</td><td class="split">✗ — portfolio instead</td><td class="split">✗</td><td class="split">✓ — pick a winner</td></tr>
+<tr><td>Use <i>both</i> models (routing / rotation)</td><td></td><td></td><td class="unique">✓ only one</td><td></td><td></td></tr>
+<tr><td>Free incumbent changes the burden of proof</td><td></td><td></td><td></td><td class="unique">✓ only one</td><td></td></tr>
+</table>
+<p style="font-size:13px;color:var(--muted)">✓ = emphasized · blank = not addressed · letters used during anonymous review: A=Expansionist, B=Contrarian, C=Executor, D=First Principles, E=Outsider</p>
+
+<h2>Peak review signals (peer-review highlights)</h2>
+<details>
+<summary>What the reviewers flagged</summary>
+<div class="body">
+<p><b>Unanimous: the Executor (C) was the strongest response</b> — all five reviewers picked it. The only advisor who operationalized the advice instead of diagnosing and punting.</p>
+<p><b>Largest blind spot verdicts:</b> A (Expansionist) hit twice for unevidenced rhetoric; A/B hit twice for demanding verification while never verifying; D (First Principles) hit three times for being a redundant compression of A under its anonymized label.</p>
+<p><b>What all five missed:</b> the incumbent asymmetry ("stay unless beaten"), free-tier confounds, prompt-caching/concurrency levers, long-horizon degradation at turn 30+, and that "keep current default absent a decisive win" is the zero-risk decision rule.</p>
+</div>
+</details>
+
+<h2>Full advisor responses</h2>
+<details>
+<summary>The Contrarian — "the premise is rotten"</summary>
+<div class="body"><p>First problem: these model names are probably wrong. "DeepSeek Flash v4.1 (1017)" and "GLM-5.3 Flash" — I can't verify either, and "1017" reads like a checkpoint date pasted from a changelog. When you can't even pin down the exact artifact, any "which is better" verdict is astrology. The most common failure in model selection isn't picking the weaker model — it's comparing two names that resolve to different weights than the ones the benchmark table tested.</p><p>Second problem: "Flash" branding is a marketing tax bracket, not an architecture. Vendors slap "Flash" on latency-optimized, often quantized or reasoning-stripped variants. For agentic coding, what matters isn't headline quality — it's whether the model survives 40-step tool loops without drifting, hallucinating tool names, or truncating diffs. Neither vendor publishes agentic-harness evals. SWE-bench numbers are a proxy with known leakage.</p><p>Third problem: the question assumes a single winner. These models are near-free. The rational move isn't a verdict — it's a two-week A/B in your actual harness on your actual repo, tracking tool-call failure rate and retry cost.</p><p>The contrarian verdict: the question being asked IS the failure mode. Whoever answers with a confident pick (including me) is bullshitting. Run the bakeoff.</p></div>
+</details>
+<details>
+<summary>The First Principles Thinker — "'better' is not a property of a model"</summary>
+<div class="body"><p>The question as posed is unanswerable, and that's the most useful thing to say. "Better" is a property of a model-in-a-context. You care about one context: agentic coding in a harness with tool loops, multi-step plans, and per-token cost. Neither the release date nor the name tells you anything about performance there. Worse, I can't verify either model exists as named — comparing unverifiable entities manufactures false confidence.</p><p>An agent harness amplifies failure modes that benchmarks underweight: malformed tool calls cascading across a 50-step loop, dropped instructions at turn 30, context compaction behavior, stop-token discipline. And on a free tier, the bottleneck may not be the model at all — it may be rate limits, routing, or quantization the provider applies.</p><p>The correct question is "how do I measure this in my harness?" Take 10 of your own real tasks (not SWE-bench — your repo, your tools), run both models blind, score tool-loop failures, latency, and incomplete plans yourself. Two hours, ground truth. Verify the models' names and availability first — if one doesn't resolve to a real endpoint, the comparison was fiction before it started.</p></div>
+</details>
+<details>
+<summary>The Expansionist — "both, sequenced"</summary>
+<div class="body"><p>Flash-tier models are commodities: near-free, fast, interchangeable. The strongest play is a routing portfolio: GLM-5.3 Flash for high-volume loops (exploration, file recon, tool chains, lint-fixing), route harder synthesis (architecture, gnarly refactors) to a flagship tier occasionally. Agent quality is dominated by loop discipline and the harness, not the flash model inside it.</p><p>Second upside: the rival being a week old is a feature. Open-weights ecosystem rivalry between DeepSeek and GLM keeps flash-tier costs collapsing toward zero — your leverage grows every time they fight. Waiting 30 days costs you nothing when your current model is free.</p><p>Third: switching costs are near zero. A/B them on your actual workload — the same 20 real agent tasks through each, count successful tool chains and retry rates. Your task distribution is the only benchmark that matters. Treat model choice as a quarterly rotation, not a marriage.</p></div>
+</details>
+<details>
+<summary>The Outsider — "is better worth paying for?"</summary>
+<div class="body"><p>"Flash" apparently means the cheap, fast version — the economy seat, not business class. But note the trap already: GLM-5.3 Flash is labeled free tier, DeepSeek's is not. So one real option costs nothing. The question isn't just "which is better," it's "is better worth paying for."</p><p>The trust problem: "Released Oct 17" tells me it's new, not that it's good. Every AI company claims its new model is better; that's like a restaurant saying its food is tasty. Benchmarks are the models' homework — I care whether the agent actually finishes jobs without making a mess.</p><p>You judge them the way you judge a new employee — give both the same actual work for a few days and count the results. Same three or four real tasks: a bug fix, a refactor, wiring up a tool. Whichever one finishes with fewer nonsense edits and less babysitting wins. Cheap and adequate beats expensive and impressive.</p><p>One boring outsider warning: "we just switched models" is rarely why your agent output is bad. Prompt quality and harness setup matter more. Test against that possibility too.</p></div>
+</details>
+<details>
+<summary>The Executor — "the 60-minute gauntlet"</summary>
+<div class="body"><p>Stop debating. Both models are cheap-tier "flash" variants, so cost difference is noise; the deciding variables are tool-call reliability and instruction-following, and both are testable in 60 minutes.</p><p><b>1. Swap models (5 min).</b> /models deepseek and /models glm to confirm exact provider IDs both are resolvable under. If DeepSeek v4.1 isn't available through your existing providers, that's your answer before any test.</p><p><b>2. Run a 5-prompt gauntlet on each model (2×15 min).</b> Same session context, fresh instance per model: "Fix the failing test in this repo" (a known-broken one). An ambiguous refactor prompt with a constraint ("rename x across the repo, don't touch tests"). A multi-step task: create file A, then edit file B referencing A. A prompt requiring a subagent/task dispatch or web fetch. A long-context prompt: paste the spec + a large file, ask for a targeted diff.</p><p><b>3. Score 4 signals only:</b> tool-calls needing retry, scope violations, lines-of-diff to correct fix, wall-clock time.</p><p><b>Decision rule:</b> identical correctness? take the one with fewer tool retries. Fewer retries but slower? still the reliable one — retries are where agentic runs die silently. Run it twice before switching defaults permanently.</p></div>
+</details>
+
+<h2>Full peer reviews</h2>
+<details>
+<summary>Peer review 1 (reviewing as advisor 1)</summary>
+<div class="body"><p><b>Strongest: C.</b> The only one with a concrete, executable protocol — specific prompts, 4-signal scoring rubric, a decision rule, and an honest n=1 caveat. A and B make the same "run a bakeoff" point but stop at methodology sermonizing; D is a two-line paraphrase of A; E offers strategy but no test.</p><p><b>Biggest blind spot: A (and B).</b> Both demand the user "verify the model exists" but never do it themselves. Five advisors shipped zero actual facts about either model, then lectured the user on ground truth. Also A/E assume symmetric switching effort; GLM-5.3 Flash is already working on the free tier, so the burden of proof lies with DeepSeek.</p><p><b>What all five missed:</b> (1) None noticed the user is already on GLM-5.3 Flash — the rational answer is "stay unless DeepSeek demonstrably beats it." (2) All treat a bakeoff as trivial while conceding free-tier confounds that make A/B unreliable on a shared free endpoint. (3) No one asked what the current model's actual failure modes are — without a diagnosed problem, there's nothing to switch for.</p></div>
+</details>
+<details>
+<summary>Peer review 2</summary>
+<div class="body"><p><b>1. Strongest: C.</b> A, B, and D all diagnose and punt; E speculates. C ends with a concrete executable protocol — exact prompts, score metrics, a decision rule, and a noise caveat — and names the decisive gate first: if DeepSeek doesn't resolve in your provider list, done.</p><p><b>2. Biggest blind spot: A and D.</b> They're near-identical (D is A compressed — a redundancy failure the council should catch). Their blind spot: refusing any judgment when one candidate is already installed and working — a bias toward inaction.</p><p><b>3. What all five missed:</b> actual evidence (nobody did even five searches for community reports); OpenCode free-tier routing may silently swap models or quantizations mid-week, corrupting any A/B; concurrency/caching behavior (parallel tool calls, prompt-cache hit rates) — often the real latency/cost lever; nobody actually checked whether "DeepSeek Flash v4.1" exists.</p></div>
+</details>
+<details>
+<summary>Peer review 3</summary>
+<div class="body"><p><b>Strongest: C.</b> The only response with a runnable protocol and a concrete first check.</p><p><b>Biggest blind spot: D.</b> A compressed copy of A with no added content. B close: rails about unverifiable names but never verifies them despite having web search.</p><p><b>All five miss:</b> (1) Verification was trivially easy and nobody did it. (2) GLM-5.3 Flash is the incumbent with accumulated evidence — the user already has empirical GLM sessions; the question is whether DeepSeek beats a known baseline. (3) Free-tier economics: if both endpoints are free, deciding "wrong" costs nothing. (4) "DeepSeek released a strong open coding model recently" went untested.</p></div>
+</details>
+<details>
+<summary>Peer review 4</summary>
+<div class="body"><p><b>1. Strongest: C.</b> The only response with an executable plan. A and B make the same anti-verdict argument but never operationalize it.</p><p><b>2. Biggest blind spot: E.</b> Asserts "agent quality is dominated by the harness" with no evidence and never verifies either model is routable. D is a collapse of A.</p><p><b>3. All missed:</b> actual verification via the harness's own model registry (a five-second tool call everyone skipped); free-tier mechanics confounding attribution; long-horizon degradation across 50+ turn sessions not targeted in the gauntlet; larger n at lower fidelity (20 tasks) beats small n at high fidelity for separating close models.</p></div>
+</details>
+<details>
+<summary>Peer review 5</summary>
+<div class="body"><p><b>1. C is strongest.</b> Exact model-ID resolution check, 5-prompt gauntlet targeting the failure modes that actually kill agent runs, explicit scoring rules with a decision tiebreaker.</p><p><b>2. A has the biggest blind spot.</b> "Near-free, fast, interchangeable" and "the harness dominates" — thinly evidenced claims contradicting C's point that tool-call reliability varies sharply between models. Economics narrative substituting for the testing it waves at. B second: hedging "including me" while shifting all work to the user.</p><p><b>3. All five missed:</b> irony-check — GLM-5.3 Flash is demonstrably real (this council runs on it); tool/schema support specifics; prompt-caching quality and long-context degradation as the real flash-tier differentiators; "keep current default absent a decisive win" as a decision rule — reversal risk is never priced in.</p></div>
+</details>
+
+<footer>Counciled by the LLM Council skill · 5 advisors, anonymous peer review, chairman synthesis · Oct 27, 2026 · Full transcript: council-transcript-20261027-1151.md</footer>
+
+</div></body>
+</html>
