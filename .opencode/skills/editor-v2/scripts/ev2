@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# ev2 — Editor V2 command line. Lives in the skill; `ev2 doctor` links it to ~/.local/bin/ev2.
+# Without the link, call it directly: bash <skill>/scripts/ev2 <command> ...
+set -euo pipefail
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+SK="$(cd "$(dirname "$SELF")/.." && pwd)"
+source "$SK/scripts/env.sh"
+
+VERSION="editor-v2 2.3.0"
+
+usage() {
+  cat <<'EOF'
+Usage: ev2 <command> [arguments...]
+
+Pipeline (in order):
+  doctor [--install-speech]        Check/install everything; links ev2 into ~/.local/bin
+  init <file|--latest> [name]      New video dir from a recording (cam_raw.mp4, vo.wav, omarchy.json)
+  transcribe <dir> [--model M] [--windowed] [--force]
+                                   Whisper words -> snap onsets -> clean (writes work/timeline.json);
+                                   --force replaces a hand-corrected words.json (backup kept)
+  clean <dir> [--hook-split S] [--retakes]
+                                   Re-run silence/retake cutting after editing cuts.json
+  build <dir> [--final]            build.py -> hf lint -> hf render out/render.mp4 (--final: FINAL=1)
+  inserts <dir> [--final] [--only NAME] [--force]
+                                   Explainer inserts: inserts.py scenes -> work/inserts/*.mp4|.mov
+  finish <dir> [--editor concat|kdenlive|both|none]
+                                   final.mp4 + hook.mp4 + editor project + Short + chapters, then verify
+  verify <dir>                     Definition-of-done check -> out/verify.md (exit 1 = not done)
+
+Tools:
+  concat <dir>                     (Re)generate the Concat project out/concat/concat.json
+  kdenlive <dir>                   (Re)generate out/project.kdenlive
+  body <dir> [--plan-only]         Analyze screen + plan zooms (or render the polished body alone)
+  short <in.mp4> <out.mp4> [...]   9:16 Short from a 16:9 video
+  convert-model <hf-repo-id>      Make a Hugging Face Whisper fine-tune (e.g. Darija) usable by transcribe
+  asr-check <dir> --ref FILE [--from S --to S]
+                                   Word error rate of the transcript against your own reference text
+  preview [--out DIR]              8 s self-test render (no media needed)
+  find <query> <outdir> [...]      Search archive.org / NASA / Wikimedia / Mixkit / YouTube footage
+  capture <jobs.json> <outdir>     Screenshots of web pages, docs and X posts (headless Chrome)
+  version | help
+EOF
+}
+
+need_dir() { [ $# -ge 1 ] && [ -d "$1" ] || { echo "ev2: need an existing video dir (got: ${1:-nothing})" >&2; exit 2; }; }
+
+[ $# -eq 0 ] && { usage; exit 0; }
+CMD="$1"; shift
+
+case "$CMD" in
+  doctor)     exec bash "$SK/scripts/doctor.sh" "$@" ;;
+  init)       exec bash "$SK/scripts/new-video.sh" "$@" ;;
+  transcribe)
+    need_dir "$@"; VD="$1"; shift
+    "$EV2_PY" "$SK/scripts/transcribe.py" "$VD" "$@"
+    "$EV2_PY" "$SK/scripts/snap-onsets.py" "$VD"
+    "$EV2_PY" "$SK/scripts/clean-retakes.py" "$VD"
+    ;;
+  clean)      need_dir "$@"; exec "$EV2_PY" "$SK/scripts/clean-retakes.py" "$@" ;;
+  build)
+    need_dir "$@"; VD="$1"; shift
+    FINAL_ENV=""
+    for x in "$@"; do [ "$x" = "--final" ] && FINAL_ENV=1; done
+    cd "$VD"
+    FINAL="$FINAL_ENV" "$EV2_PY" build.py
+    hf lint .
+    hf render . -q standard -f 30 -o out/render.mp4
+    [ -s out/render.mp4 ] || { echo "ev2 build: render produced no out/render.mp4" >&2; exit 1; }
+    echo "ev2 build: out/render.mp4 ($(ffprobe -v error -show_entries format=duration -of csv=p=0 out/render.mp4)s)"
+    ;;
+  inserts)    need_dir "$@"; exec "$EV2_PY" "$SK/scripts/render-inserts.py" "$@" ;;
+  finish)     need_dir "$@"; exec "$EV2_PY" "$SK/scripts/finish.py" "$@" ;;
+  verify)     need_dir "$@"; exec "$EV2_PY" "$SK/scripts/verify.py" "$@" ;;
+  concat)     need_dir "$@"; exec "$EV2_PY" "$SK/scripts/concat-gen.py" "$@" ;;
+  kdenlive)   need_dir "$@"; exec "$EV2_PY" "$SK/scripts/kdenlive-gen.py" "$@" ;;
+  short)      exec "$EV2_PY" "$SK/scripts/short-extract.py" "$@" ;;
+  asr-check)  need_dir "$@"; exec "$EV2_PY" "$SK/scripts/asr-check.py" "$@" ;;
+  convert-model) exec bash "$SK/scripts/convert-model.sh" "$@" ;;
+  body)       need_dir "$@"; exec "$EV2_PY" "$SK/scripts/body_render.py" "$@" ;;
+  preview)    exec "$EV2_PY" "$SK/scripts/preview.py" "$@" ;;
+  find)       exec "$EV2_PY" "$SK/scripts/find-footage.py" "$@" ;;
+  capture)    exec node "$SK/scripts/capture.mjs" "$@" ;;
+  version|--version|-v) echo "$VERSION ($SK)" ;;
+  help|--help|-h) usage ;;
+  *) echo "ev2: unknown command '$CMD' (ev2 help)" >&2; exit 2 ;;
+esac

@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 *.pyo
+
+# editor-v2: generated sounds/music, rebuilt by `ev2 doctor` (synth-sfx.py, synth-music.py)
+.opencode/skills/editor-v2/sfx/ev1kit/*.wav
