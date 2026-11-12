@@ -5,6 +5,7 @@ and the Omarchy corner webcam overlay helper:
 1. screen_zoom: dynamic zoom into screen regions with optional spotlight highlight & webcam pinning
 2. shortcut_pill & cmd_toast: keyboard shortcut glass pills & typed CLI command toasts
 3. chapter_banner: YouTube chapter sync + full-screen title card or sleek lower-third
+   title_card: calm full-frame opening card (brand, title, subtitle, 0-2 screenshots)
 4. flow_diagram: animated architectural node graph with glowing edges & SVG arrows
 5. split_compare: split-screen side-by-side comparison with staggered bullet reveals
 6. omarchy_cam_pip: Omarchy 8:9 corner webcam crop and pin card
@@ -292,6 +293,72 @@ def chapter_banner(c, t0, t1, number, title, subtitle='', z=70, style='card'):
 
         sfx(c, t0, 'click_soft')
         return lt_id
+
+
+def title_card(c, t0, t1, title, subtitle='', brand='', thumbs=(), z=40):
+    """Calm full-frame title card for walkthrough videos (the calm style's opening).
+
+    Dark ground (#14141c, soft diagonal light) with a left column: brand line (dot + brand),
+    big bold title (2 lines max) and a muted subtitle. Darija text renders RTL (Arabic font, <bdi>).
+    thumbs = 0-2 image paths shown on the right in rounded frames, sliding in 0.3 s after t0.
+    Fades in over 0.35 s and out over the last 0.45 s (onto whatever plays under it). One swish.
+    Returns the clip id.
+    """
+    t0, t1 = fr(t0), fr(t1)
+    thumbs = [p for p in (thumbs or ()) if p][:2]
+    lid = c.uid('tcard')
+    col_id = c.uid('tccol')
+    col_w = 820 if thumbs else 1560
+
+    def txt(text, size, weight, color, lh_lat, lh_ar, extra=''):
+        if has_arabic(text):
+            return (f'<div dir="rtl" style="font:{weight} {size}px/{lh_ar} var(--ev2-arabic),var(--ev1-sans);'
+                    f'color:{color};text-align:right;{extra}">{bidi_text(text)}</div>')
+        return (f'<div style="font:{weight} {size}px/{lh_lat} var(--ev1-sans);color:{color};'
+                f'letter-spacing:-0.01em;{extra}">{esc(str(text))}</div>')
+
+    brand_html = ''
+    if brand:
+        rtl = has_arabic(brand)
+        dot = '<span style="width:14px;height:14px;border-radius:50%;background:var(--ev1-marker);box-shadow:0 0 14px rgba(255,224,74,0.55);flex:none"></span>'
+        bdir, bfont = (' dir="rtl"', 'var(--ev2-arabic),') if rtl else ('', '')
+        name = (f'<span{bdir} style="font:600 26px/1 {bfont}var(--ev1-sans);'
+                f'color:rgba(255,255,255,0.78);letter-spacing:0.02em">{bidi_text(brand)}</span>')
+        flow = 'row-reverse;justify-content:flex-start' if has_arabic(title) else 'row;justify-content:flex-start'
+        brand_html = f'<div style="display:flex;flex-direction:{flow};align-items:center;gap:14px;margin-bottom:38px">{dot}{name}</div>'
+    clamp = 'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden'
+    title_html = txt(title, 84, 800, '#F5F6FA', 1.08, 1.4, clamp)
+    sub_html = txt(subtitle, 30, 500, 'rgba(255,255,255,0.6)', 1.35, 1.5, 'margin-top:26px') if subtitle else ''
+
+    frames_html, frame_ids = [], []
+    boxes = [(1000, 170, 760, 428), (1120, 520, 680, 382)] if len(thumbs) == 2 else [(1000, 300, 800, 450)]
+    for p, (x, y, w, h) in zip(thumbs, boxes):
+        fid = c.uid('tcth')
+        frame_ids.append(fid)
+        frames_html.append(f'<div id="{fid}" style="position:absolute;left:{x}px;top:{y}px;width:{w}px;height:{h}px;'
+                           f'border-radius:18px;overflow:hidden;border:2px solid rgba(255,255,255,0.16);'
+                           f'box-shadow:0 24px 60px rgba(0,0,0,0.55);background:#0c0c12">'
+                           f'<img src="{esc(str(p))}" style="width:100%;height:100%;object-fit:cover;display:block"></div>')
+
+    inner = (f'<div id="{lid}" style="position:absolute;inset:0;background:#14141c;'
+             f'background-image:linear-gradient(135deg,rgba(255,255,255,0.075) 0%,rgba(255,255,255,0.02) 38%,'
+             f'rgba(0,0,0,0) 60%,rgba(0,0,0,0.28) 100%)">'
+             f'<div id="{col_id}" style="position:absolute;left:120px;top:50%;transform:translateY(-50%);width:{col_w}px">'
+             f'{brand_html}{title_html}{sub_html}</div>{"".join(frames_html)}</div>')
+    cid = c.clip(t0, t1, inner, z)
+
+    c.pre.append(f'gsap.set("#{lid}",{{opacity:0}});')
+    c.at(f'tl.fromTo("#{lid}",{{opacity:0}},{{opacity:1,duration:0.35,ease:"power2.out",immediateRender:false}},{t0:.4f});')
+    c.at(f'tl.fromTo("#{col_id}",{{y:18}},{{y:0,duration:0.6,ease:"power3.out",immediateRender:false}},{t0:.4f});')
+    for j, fid in enumerate(frame_ids):
+        ts = t0 + 0.3 + j * 0.12
+        c.pre.append(f'gsap.set("#{fid}",{{x:90,opacity:0}});')
+        c.at(f'tl.fromTo("#{fid}",{{x:90,opacity:0}},{{x:0,opacity:1,duration:0.5,ease:"power3.out",immediateRender:false}},{ts:.4f});')
+    t_out = max(t0 + 0.35, t1 - 0.45)
+    c.at(f'tl.fromTo("#{lid}",{{opacity:1}},{{opacity:0,duration:{t1 - t_out:.4f},ease:"power2.in",immediateRender:false}},{t_out:.4f});')
+
+    sfx(c, t0, 'swish', 0.5)
+    return cid
 
 
 # ------------------------------------------------------------------ 4. FLOW DIAGRAM

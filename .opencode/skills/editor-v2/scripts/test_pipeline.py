@@ -205,6 +205,112 @@ def main():
     except TL.TimelineError:
         check(True, 'non-boolean body_music is rejected')
 
+    print('\n[6] key pills')
+    wp = os.path.join(vd, 'work/tx/words.json')
+    tlp = os.path.join(vd, 'work/timeline.json')
+    words_bak = open(wp, 'rb').read()
+    tl_bytes = open(tlp, 'rb').read()
+    said = 15 * PERIOD + ON + 0.05         # inside the pause after burst 15
+    ws = json.loads(words_bak) + [{'w': 'سوبر', 's': round(said, 3), 'e': round(said + 0.25, 3)},
+                                  {'w': 'سبيس', 's': round(said + 0.3, 3), 'e': round(said + 0.55, 3)}]
+    ws.sort(key=lambda x: x['s'])
+    json.dump(ws, open(wp, 'w'), ensure_ascii=False)
+    sh([PY, os.path.join(HERE, 'keys-suggest.py'), vd])
+    sg = json.load(open(os.path.join(vd, 'work/keys-suggest.json')))['suggestions']
+    check(any(s['keys'] == 'Super + Space' and abs(s['src_t'] - said) < 0.5 for s in sg),
+          f'keys-suggest finds "سوبر سبيس" -> Super + Space near {said:.2f} ({[(s["keys"], s["src_t"]) for s in sg]})')
+    check(open(tlp, 'rb').read() == tl_bytes, 'keys-suggest leaves work/timeline.json untouched')
+    open(wp, 'wb').write(words_bak)
+
+    probe = lambda p: float(subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', p],
+                                           capture_output=True, text=True).stdout.strip())
+    dur_before = probe(fin)
+    tl = TL.load(vd)
+    tl['keys'] = [{'src_t': 17 * PERIOD + 0.3, 'keys': 'Super + Space', 'label': 'test'}]
+    TL.save(vd, tl)
+    r = subprocess.run(fin_cmd + ['--no-keys'], capture_output=True, text=True)
+    check(r.returncode == 0, 'finish --no-keys --raw-body exits 0')
+    check(json.load(open(os.path.join(vd, 'work/finish.json'))).get('keys_drawn') is False, '--no-keys: keys_drawn false')
+    check('WARN  key pills' in r.stdout, 'verify WARNs when pills are listed but not drawn')
+
+    poly_cmd = [PY, os.path.join(HERE, 'finish.py'), vd, '--editor', 'none', '--no-open', '--preset', 'ultrafast', '--no-short']
+    r = subprocess.run(poly_cmd, capture_output=True, text=True)
+    print(r.stdout[-1200:], r.stderr[-1200:])
+    check(r.returncode == 0, 'finish with one key pill exits 0')
+    fj = json.load(open(os.path.join(vd, 'work/finish.json')))
+    check(fj.get('key_pills') == 1 and fj.get('keys_drawn') is True, f'finish.json: key_pills 1, keys_drawn ({fj.get("key_pills")}, {fj.get("keys_drawn")})')
+    check('key_click' in open(os.path.join(vd, 'work/body_cues.txt')).read(), 'body_cues.txt has the key click')
+    check(json.load(open(os.path.join(vd, 'work/body_video.json'))).get('pills') == 1, 'body_video.json records 1 pill drawn')
+    dur_after = probe(fin)
+    check(abs(dur_after - dur_before) < 0.05, f'final.mp4 length unchanged by the pill ({dur_before:.3f} -> {dur_after:.3f} s)')
+    check('PASS  key pills' in r.stdout, 'verify PASS: key pills')
+    v0 = json.load(open(os.path.join(vd, 'out/verify.json')))['verdict']
+
+    tl = TL.load(vd)
+    tl['keys'][0]['dur'] = 2.0
+    TL.save(vd, tl)
+    r = verify()
+    check(r.returncode == 1 and 'FAIL  stale keys' in r.stdout, 'verify FAILs stale keys when a pill changed after finish')
+    del tl['keys'][0]['dur']
+    TL.save(vd, tl)
+
+    print('\n[7] description')
+    describe = lambda *x: subprocess.run([PY, os.path.join(HERE, 'describe.py'), vd, *x], capture_output=True, text=True)
+    dp = os.path.join(vd, 'out/youtube-description.md')
+    r = describe('--lang', 'en')
+    check(r.returncode == 0 and os.path.isfile(dp), f'describe writes out/youtube-description.md ({r.stdout.strip()[-200:]})')
+    text = open(dp, encoding='utf-8').read()
+    ch_lines = [l.rstrip() for l in open(os.path.join(vd, 'out/youtube-chapters.txt'), encoding='utf-8') if l.strip()]
+    check(all(l in text.splitlines() for l in ch_lines), 'description contains the exact chapter lines')
+    check(describe('--check').returncode == 1, 'describe --check exits 1 while WRITE slots remain')
+    r = verify()
+    check(any(l.strip().startswith(('WARN  description', 'PASS  description')) for l in r.stdout.splitlines()),
+          'verify reports a description line')
+    check(json.load(open(os.path.join(vd, 'out/verify.json')))['verdict'].startswith('DONE') == v0.startswith('DONE'),
+          'open description slots do not change DONE / NOT DONE')
+    import re
+    open(dp, 'w', encoding='utf-8').write(re.sub(r'<!-- WRITE.*?-->', 'A sentence written by hand.', text, flags=re.S))
+    r = describe('--check')
+    check(r.returncode == 0, f'describe --check exits 0 once the slots are filled ({r.stdout.strip()[-200:]})')
+    r = verify()
+    check('PASS  description' in r.stdout, 'verify PASS: description')
+    check(json.load(open(os.path.join(vd, 'out/verify.json')))['verdict'] == v0, f'verify verdict unaffected ({v0})')
+    r = describe()
+    check(r.returncode == 1 and 'edited' in r.stdout, 'describe refuses to overwrite a hand-edited description')
+    check(describe('--force').returncode == 0, 'describe --force regenerates it')
+    tl = TL.load(vd)
+    tl.pop('keys', None)
+    TL.save(vd, tl)
+
+    print('\n[8] calm style')
+    vc = os.path.join(root, 'vid_calm')
+    shutil.copytree(vd, vc, symlinks=True)
+    tpl, tpl_calm = os.path.join(SK, 'template/build.py'), os.path.join(SK, 'template/build_calm.py')
+    same = lambda p, q: open(p, 'rb').read() == open(q, 'rb').read()
+    style = lambda d: json.load(open(os.path.join(d, 'kit.json'))).get('style')
+    sh(['bash', os.path.join(HERE, 'set-style.sh'), vc, 'calm'])
+    check(same(os.path.join(vc, 'build.py'), tpl_calm) and style(vc) == 'calm', 'set-style calm: calm build.py, kit.json style calm')
+    for f in ['index.html', 'work/build.json']:
+        if os.path.exists(os.path.join(vc, f)):
+            os.remove(os.path.join(vc, f))
+    r = subprocess.run([PY, 'build.py'], cwd=vc, capture_output=True, text=True)
+    print(r.stdout[-600:], r.stderr[-600:])
+    check(r.returncode == 0, 'calm build.py exits 0')
+    bjc = os.path.join(vc, 'work/build.json')
+    check(os.path.isfile(os.path.join(vc, 'index.html')) and os.path.isfile(bjc), 'calm build.py writes index.html and work/build.json')
+    check(bool(json.load(open(bjc))['placeholders']), 'calm build.json lists the template placeholders')
+    r = subprocess.run([PY, 'build.py'], cwd=vc, capture_output=True, text=True, env=dict(os.environ, FINAL='1'))
+    check(r.returncode != 0, 'calm FINAL=1 refuses while examples remain')
+    open(os.path.join(vc, 'build.py'), 'a').write('\n# hand edit\n')
+    sh(['bash', os.path.join(HERE, 'set-style.sh'), vc, 'documentary'])
+    import glob
+    check(bool(glob.glob(os.path.join(vc, 'build.py.bak-*'))), 'set-style backs up a hand-edited build.py')
+    check(same(os.path.join(vc, 'build.py'), tpl) and style(vc) == 'documentary', 'set-style documentary: template build.py back')
+    sh(['bash', os.path.join(HERE, 'new-video.sh'), rec, 'vid_calm_init', '--dir', root, '--style', 'calm'])
+    vi = os.path.join(root, 'vid_calm_init')
+    check(style(vi) == 'calm' and same(os.path.join(vi, 'build.py'), tpl_calm), 'new-video.sh --style calm: calm build.py and kit.json style')
+    check(style(vd) == 'documentary' and same(os.path.join(vd, 'build.py'), tpl), 'default video stays documentary')
+
     print('\ntest_pipeline: ALL PASSED')
     if not a.keep:
         shutil.rmtree(root, ignore_errors=True)

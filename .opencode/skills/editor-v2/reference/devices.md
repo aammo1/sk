@@ -58,6 +58,7 @@ from ev2_tutorial import *     # every device + Comp, fr, esc, sfx, bidi helpers
 | **28** | `chapter_banner` | Fullscreen title card or sleek lower-third | card: `swish` + `hit`; lower third: `click_soft` |
 | **29** | `flow_diagram` | Architecture node graph with glowing arrows | `click` + `click_soft` |
 | **30** | `split_compare` | Side-by-side comparison with staggered bullets | `click_soft` |
+| **+** | `title_card` | Calm full-frame title card (calm style hook) | `swish` |
 | **+** | `omarchy_cam_pip` | Omarchy 8:9 corner webcam crop and pin card | none |
 
 ---
@@ -188,6 +189,9 @@ screen_zoom(c, t0, t1, src, roi, z=1, media_start=0.0,
 - **Description:** Dark translucent glass pill displaying keycaps joined by `+` separators. Pops in with elastic spring physics.
 - **BiDi:** Native support for Arabic/Darija labels alongside Latin key symbols (e.g., `['Super', 'Shift', 'R']` with label `'تسجيل الشاشة'`).
 - **Sound:** `key_click` on entrance.
+- **In the body:** for a shortcut used in the screencast, a key pill in `work/timeline.json` `"keys"` is the cheap
+  alternative to an explainer insert: `ev2 finish` draws it (same look, soft key click) with no scene to write.
+  `ev2 keys <dir>` suggests entries from the transcript. Format and rules: SKILL.md › timeline.
 
 #### `cmd_toast(c, t0, t1, cmd, z=65, y=900)`
 - **Description:** Floating terminal capsule showing a shell prompt (`$`) with sequential character typing animation and glowing cursor.
@@ -217,6 +221,24 @@ split_compare(c, t0, t1, left, right, z=10, vs_label='VS')
 - **Description:** High-contrast side-by-side comparison screen dividing before/after or manual/automated workflows.
 - **Panels:** Two sliding dark gradient panels with custom accent colors (e.g. red for manual pain, green for automated solution).
 - **Staggered Bullets:** Animated bullet points sliding in with cross/check indicators and `click_soft` SFX. Center circle badge with `VS` label pops in with back-bounce ease.
+
+### + · Title Card — `title_card(...)`
+```python
+title_card(c, t0, t1, title, subtitle='', brand='', thumbs=(), z=40)
+```
+- **Look:** calm full-frame card: dark ground (#14141c, soft diagonal light), a left column with the brand line
+  (yellow dot + brand), a big bold title (2 lines max) and a muted subtitle. Darija text renders RTL.
+- **Thumbs:** 0–2 image paths shown on the right in rounded frames, sliding in 0.3 s after `t0`.
+- **Motion / sound:** fades in over 0.35 s and out over the last 0.45 s, onto whatever plays under it. One `swish`. Returns the clip id.
+
+### Calm style hook (`template/build_calm.py`)
+For plain walkthrough videos where the documentary montage would be too much (the creator chooses it:
+`ev2 init <rec> [name] --style calm` or `ev2 style <dir> calm`; `ev2 style <dir> documentary` switches back).
+Layout: `title_card` from 0 to ~4.5 s (title, subtitle and brand are `example()` texts that `FINAL=1` refuses
+until replaced; screenshots from the optional `thumb1`/`thumb2` keys in `work/assets.json`), then the original
+screencast (`c.video(..., 'assets/media/cam_raw.mp4', ...)`, not zoomed or pinned) until the hook split, with
+optional `shortcut_pill` beats over it. Zooms, the PiP and chapter cards start with the body. Set the hook split
+at the end of the spoken intro (5–15 s). It writes the same files as the documentary template.
 
 ---
 
@@ -276,3 +298,5 @@ Rules:
 
 Helpers: `fr(t)` (round to frame), `esc(s)`, `sfx(c, t, role, gain_scale)` (cue a sound role from `SND`),
 `has_arabic`, `bidi_span`, `bidi_text`, `css_once`, `dstr`.
+Known limit: `bidi_text` wraps each Latin word separately, so several consecutive Latin words inside a Darija line
+may display in reverse order. Keep Latin runs to one word, or put them in a separate line/subtitle.

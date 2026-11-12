@@ -2,7 +2,7 @@
 """finish.py — assemble every deliverable from work/timeline.json, then verify it.
 
     finish.py <video-dir> [--editor concat|kdenlive|both|none] [--captions] [--no-zoom] [--no-cam]
-                          [--raw-body] [--no-voice-fx] [--no-bed] [--song FILE] [--bed-under LU] [--body-music] [--body-under LU] [--no-short] [--no-open]
+                          [--raw-body] [--no-keys] [--no-voice-fx] [--no-bed] [--song FILE] [--bed-under LU] [--body-music] [--body-under LU] [--no-short] [--no-open]
 
 Steps (any failure stops with a non-zero exit; nothing is silently skipped):
   1. Load work/timeline.json (hook_split + body segments + chapters).
@@ -14,9 +14,11 @@ Steps (any failure stops with a non-zero exit; nothing is silently skipped):
      -> work/hook_audio.wav.
   5. Body: the kept segments of the clean voice, sample-exact, 10 ms fades at every cut
      -> work/body_voice.wav; the picture from body_render.py (auto zooms, styled webcam,
-     chapter cards, --captions burned in) -> work/body_video.mp4 (--raw-body: plain cuts, refused
-     when the timeline has inserts). Insert SFX cues (work/inserts/<name>.cues.txt) are shifted to
-     the insert's body time and mixed into the body audio -> work/body_mix.wav.
+     chapter cards, key pills from "keys" in timeline.json, --captions burned in)
+     -> work/body_video.mp4 (--raw-body: plain cuts, no key pills, refused when the timeline has
+     inserts; --no-keys: skip the key pills for this run). Insert SFX cues
+     (work/inserts/<name>.cues.txt) are shifted to the insert's body time, a soft key click is
+     added when each key pill appears, and both are mixed into the body audio -> work/body_mix.wav.
   6. Hook + body audio, two-pass loudness-normalized to -14 LUFS / -1.5 dBTP (YouTube)
      -> work/final_audio.wav; one final video encode of render.mp4 + body_video.mp4 (both
      already encoded once: body_video at CRF 16 to keep the second generation clean)
@@ -182,6 +184,7 @@ def main():
     ap.add_argument('--no-zoom', action='store_true', help='No automatic zooms on the body')
     ap.add_argument('--no-cam', action='store_true', help='Leave the webcam as recorded (no styled PiP)')
     ap.add_argument('--raw-body', action='store_true', help='Plain cut screencast: no zooms, PiP, chapter cards')
+    ap.add_argument('--no-keys', action='store_true', help='Do not draw the key pills listed in timeline.json for this run')
     ap.add_argument('--no-voice-fx', action='store_true', help='Skip voice cleanup')
     ap.add_argument('--lufs', type=float, default=-14.0, help='Target integrated loudness (default -14, YouTube)')
     ap.add_argument('--no-short', action='store_true')
@@ -202,6 +205,19 @@ def main():
     ins_list = TL.insert_ranges(tl)
     if ins_list and a.raw_body:
         raise FinishError('inserts need the polished body: drop --raw-body (or remove "inserts" from work/timeline.json)')
+    try:
+        pills = TL.key_ranges(tl)
+        keys_sig = TL.keys_signature(tl)
+    except TL.TimelineError as e:
+        if not a.no_keys:
+            raise
+        print(f'  key pills skipped (--no-keys; they are invalid: {e})')
+        pills, keys_sig = [], None
+    draw_keys = bool(pills) and not a.no_keys and not a.raw_body
+    if pills and a.raw_body:
+        print('  note: key pills are not drawn with --raw-body')
+    elif pills and a.no_keys:
+        print('  key pills skipped (--no-keys)')
     hs = float(tl['hook_split'])
     has_hook = hs > 0
     if not segs:
@@ -291,13 +307,23 @@ def main():
 
     body_audio = body_base
     body_cues = insert_cue_lines(ins_list)
-    if body_cues:
+    key_cues = [f'{max(0.0, p["body_t"] - 0.004):.3f}  ev1kit/key_click  {0.36 * 0.8:.3f}'
+                for p in pills if p['sfx']] if draw_keys else []
+    if body_cues or key_cues:
+        header = '# insert SFX in body time\n'
+        if key_cues:
+            n_ins = len(body_cues)
+            body_cues = sorted(body_cues + key_cues, key=lambda l: float(l.split()[0]))
+            header = '# insert / key-pill SFX in body time\n'
         with open('work/body_cues.txt', 'w', encoding='utf-8') as f:
-            f.write('# insert SFX in body time\n' + '\n'.join(body_cues) + '\n')
+            f.write(header + '\n'.join(body_cues) + '\n')
         run([sys.executable, os.path.join(HERE, 'mix-sfx.py'), body_base, 'work/body_cues.txt',
-             'work/body_mix.wav'], 'mix-sfx.py (insert SFX)')
+             'work/body_mix.wav'], 'mix-sfx.py (insert SFX)' if not key_cues else 'mix-sfx.py (insert / key-pill SFX)')
         body_audio = 'work/body_mix.wav'
-        print(f'  {len(body_cues)} insert SFX cues -> work/body_mix.wav')
+        if key_cues:
+            print(f'  {n_ins} insert SFX cues + {len(key_cues)} key clicks -> work/body_mix.wav')
+        else:
+            print(f'  {len(body_cues)} insert SFX cues -> work/body_mix.wav')
     else:
         for p in ['work/body_mix.wav', 'work/body_cues.txt']:
             if os.path.isfile(p):
@@ -305,9 +331,11 @@ def main():
 
     body_v = None
     if not a.raw_body:
-        step('body picture: zooms, webcam PiP, chapter cards' + (', captions' if a.captions else ''))
+        step('body picture: zooms, webcam PiP, chapter cards' + (', key pills' if draw_keys else '')
+             + (', captions' if a.captions else ''))
         import body_render
-        plan = body_render.render(vd, zoom=not a.no_zoom, cam=not a.no_cam, captions=a.captions, preset=a.preset)
+        plan = body_render.render(vd, zoom=not a.no_zoom, cam=not a.no_cam, captions=a.captions, preset=a.preset,
+                                  keys=not a.no_keys)
         body_v = 'work/body_video.mp4'
         bi = probe(body_v)
         if abs(bi.get('v_dur', 0) - body_dur) > 1.5 / FPS:
@@ -396,6 +424,7 @@ def main():
 
     json.dump({'cut_signature': TL.cut_signature(tl), 'chapter_signature': TL.chapter_signature(vd, tl),
                'insert_signature': TL.insert_signature(vd, tl), 'inserts': [i['name'] for i in ins_list],
+               'keys_signature': keys_sig, 'key_pills': len(pills), 'keys_drawn': draw_keys,
                'body_music': bool(use_music), 'hook_duration': NH / FPS, 'body_duration': body_dur,
                'expected_final': total, 'editors': editors, 'short': not a.no_short,
                'finished': time.strftime('%Y-%m-%dT%H:%M:%S'), 'seconds': round(time.time() - t0, 1)},

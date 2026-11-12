@@ -24,6 +24,9 @@ Schema (version 1), all times in seconds of the SOURCE recording, quantized to t
         {"name": "order-flow", "src_t": 135.2, "dur": 8.0, "mode": "over", "cam": true}
       ],
       "body_music": false,                      # optional: quiet music under the whole body (ev2 finish --body-music)
+      "keys": [                                 # optional key-press pills drawn on the body
+        {"src_t": 46.0, "keys": "Super + Space", "label": "then type the name", "dur": 2.5, "sfx": true, "pos": "bottom"}
+      ],
       "updated": "2026-11-11T14:00:00"
     }
 
@@ -31,6 +34,14 @@ Insert keys: name (^[a-z0-9][a-z0-9-]{0,39}$, unique), src_t (SOURCE seconds, >=
 dur (FINAL-video seconds, 1.5-30; it covers that much of the cut body, even across cut
 boundaries), mode ("full" opaque scene | "over" transparent over the screencast; default
 "full"), cam (webcam PiP stays on top; default true).
+
+Key pill keys (the whole "keys" field is optional; no field or [] = no pills):
+    src_t  SOURCE seconds, >= hook_split (inside a cut it snaps forward to the next kept frame)
+    keys   "A + B" (split on "+") or ["A", "B"]; 1-4 non-empty keys, each <= 12 chars
+    label  optional text after the keys, <= 40 chars (default "")
+    dur    FINAL-video seconds the pill stays up, 0.8-8 (default 2.5; shortened at the body end)
+    sfx    soft key click when the pill appears (default true)
+    pos    "bottom" or "top" (default "bottom")
 
 Final-video time of a body source time t (t inside a kept segment):
     final_t = hook_duration + out_start(segment) + (t - segment.src_start)
@@ -112,6 +123,7 @@ def validate(tl):
         if 'src_t' not in c or 'title' not in c:
             raise TimelineError(f'timeline.json: chapter entries need "src_t" and "title": {c}')
     _validate_inserts(tl, hs)
+    _validate_keys(tl, hs)
 
 
 INSERT_NAME_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,39}$')
@@ -155,6 +167,70 @@ def _validate_inserts(tl, hs):
             raise TimelineError(f'timeline.json: insert "{name}": unknown mode {mode!r} (use "full" or "over")')
         if not isinstance(ins.get('cam', True), bool):
             raise TimelineError(f'timeline.json: insert "{name}": "cam" must be true or false')
+
+
+KEY_POSITIONS = ('bottom', 'top')
+KEY_DUR_MIN, KEY_DUR_MAX, KEY_DUR_DEFAULT = 0.8, 8.0, 2.5
+KEY_MAX_KEYS, KEY_MAX_CHARS, KEY_LABEL_MAX = 4, 12, 40
+KEY_MIN_FRAMES = 6
+
+
+def _split_keys(v):
+    """'A + B' or ['A', 'B'] -> ['A', 'B'] (stripped; empty parts kept so validation can reject them)."""
+    if isinstance(v, str):
+        return [k.strip() for k in v.split('+')]
+    if isinstance(v, list) and all(isinstance(k, str) for k in v):
+        return [k.strip() for k in v]
+    return None
+
+
+def _key_name(i, kp):
+    v = kp.get('keys') if isinstance(kp, dict) else None
+    if isinstance(v, list):
+        v = ' + '.join(str(k) for k in v)
+    text = v if isinstance(v, str) else ''
+    return f'key pill #{i} ("{text}")'
+
+
+def _validate_keys(tl, hs):
+    pills = tl.get('keys')
+    if pills is None:
+        return
+    if not isinstance(pills, list):
+        raise TimelineError('timeline.json: "keys" must be a list of key pills')
+    for i, kp in enumerate(pills, 1):
+        if not isinstance(kp, dict):
+            raise TimelineError(f'timeline.json: key pill #{i} must be an object')
+        who = 'timeline.json: ' + _key_name(i, kp)
+        src_t = kp.get('src_t')
+        if not _num(src_t) or src_t < 0:
+            raise TimelineError(f'{who}: "src_t" (source seconds) is required and must be a number >= 0')
+        if src_t < hs - 1e-6:
+            raise TimelineError(f'{who}: src_t {src_t:g} is inside the hook (< hook_split {hs:g}); move it into the body')
+        keys = _split_keys(kp.get('keys'))
+        if keys is None:
+            raise TimelineError(f'{who}: "keys" is required: a string like "Super + Space" or a list of strings')
+        if not 1 <= len(keys) <= KEY_MAX_KEYS or any(not k for k in keys):
+            raise TimelineError(f'{who}: needs 1-{KEY_MAX_KEYS} non-empty keys (got {len(keys)}, '
+                                f'{sum(1 for k in keys if not k)} empty)')
+        for k in keys:
+            if len(k) > KEY_MAX_CHARS:
+                raise TimelineError(f'{who}: key "{k}" is {len(k)} chars (max {KEY_MAX_CHARS}); put the extra text in "label"')
+        label = kp.get('label', '')
+        if not isinstance(label, str):
+            raise TimelineError(f'{who}: "label" must be a string')
+        if len(label) > KEY_LABEL_MAX:
+            raise TimelineError(f'{who}: label is {len(label)} chars (max {KEY_LABEL_MAX})')
+        dur = kp.get('dur', KEY_DUR_DEFAULT)
+        if not _num(dur):
+            raise TimelineError(f'{who}: "dur" (seconds) must be a number')
+        if not KEY_DUR_MIN <= dur <= KEY_DUR_MAX:
+            raise TimelineError(f'{who}: dur {dur:g} out of range ({KEY_DUR_MIN:g}-{KEY_DUR_MAX:g} s)')
+        if not isinstance(kp.get('sfx', True), bool):
+            raise TimelineError(f'{who}: "sfx" must be true or false')
+        pos = kp.get('pos', 'bottom')
+        if pos not in KEY_POSITIONS:
+            raise TimelineError(f'{who}: unknown pos {pos!r} (use "bottom" or "top")')
 
 
 def cut_signature(tl):
@@ -246,6 +322,39 @@ def insert_signature(vd, tl):
         p = insert_render_path(vd, r)
         renders[r['name']] = [os.path.getsize(p), int(os.path.getmtime(p))] if os.path.isfile(p) else None
     key = json.dumps({'ranges': ranges, 'renders': renders}, sort_keys=True)
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+def key_ranges(tl):
+    """Key pills in BODY frames, sorted:
+    [{'i','keys','label','f0','n','body_t','dur','sfx','pos','src_t'}] (i = 1-based index in "keys").
+    A pill that runs past the body end is shortened, not rejected."""
+    total = sum(s['f_end'] - s['f_start'] for s in body_segments(tl))
+    out = []
+    for i, kp in enumerate(tl.get('keys') or [], 1):
+        who = _key_name(i, kp)
+        bt = src_to_body(tl, float(kp['src_t']))
+        if bt is None:
+            raise TimelineError(f'{who} starts after the last kept segment: move src_t earlier')
+        f0, n = frames(bt), frames(kp.get('dur', KEY_DUR_DEFAULT))
+        if f0 + n > total:
+            n = total - f0
+            if n < KEY_MIN_FRAMES:
+                raise TimelineError(f'{who} starts {n / FPS:.2f} s before the end of the body '
+                                    f'(body is {total / FPS:.2f} s): move src_t earlier')
+        out.append({'i': i, 'keys': _split_keys(kp['keys']), 'label': kp.get('label', ''),
+                    'f0': f0, 'n': n, 'body_t': f0 / FPS, 'dur': n / FPS,
+                    'sfx': kp.get('sfx', True), 'pos': kp.get('pos', 'bottom'), 'src_t': float(kp['src_t'])})
+    out.sort(key=lambda r: r['f0'])
+    for a, b in zip(out, out[1:]):
+        if b['f0'] < a['f0'] + a['n']:
+            raise TimelineError(f'key pills #{a["i"]} and #{b["i"]} overlap: shorten dur or move src_t')
+    return out
+
+
+def keys_signature(tl):
+    """Hash of the key pills as drawn (timing and content): changes when any pill changes."""
+    key = json.dumps(key_ranges(tl), sort_keys=True)
     return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 

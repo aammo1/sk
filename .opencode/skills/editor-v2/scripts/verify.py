@@ -13,6 +13,7 @@ FAIL (the video is not done):
   - an insert in timeline.json is invalid, has no render, a render of the wrong frame count, a render
     older than its insert-<name>.html, or was not built FINAL (`ev2 inserts --final`)
   - inserts or their renders changed after the last `ev2 finish` (outputs are stale)
+  - key pills ("keys" in timeline.json) are invalid, or changed after the last `ev2 finish` (stale keys)
   - the hook was not built FINAL (placeholders, missing assets, or the last build was not
     `ev2 build --final`, or it was built for another hook_split)
   - work/timeline.json cuts or chapters changed after the last `ev2 finish` (outputs are stale)
@@ -22,6 +23,11 @@ WARN (publishable, but look):
   - YouTube chapter rules not met (00:00 first, >= 3 chapters, each >= 10 s)
   - loudness outside -16..-12 LUFS (finish targets -14, YouTube's reference)
   - a sync check found nothing clear enough to measure
+  - key pills are listed but the last finish did not draw them (--no-keys / --raw-body)
+Optional checks (only when the extra is used; never FAIL for the description):
+  - key pills: drawn and current -> PASS
+  - out/youtube-description.md: <!-- WRITE slots left, > 5000 characters, or its chapters block
+    differs from out/youtube-chapters.txt -> WARN; otherwise PASS
 """
 import json, os, re, subprocess, sys
 
@@ -182,6 +188,67 @@ def picture_sync(segs, NH, R=24, L=8, n_pick=5, exclude=()):
     return None, 'no screen event clear enough to cross-check'
 
 
+def check_keys(tl, fin):
+    """Key pills: only reported when the timeline lists pills or the last finish drew some."""
+    try:
+        pills = TL.key_ranges(tl)
+    except TL.TimelineError as e:
+        add('FAIL', 'key pills', str(e))
+        return
+    sig = fin.get('keys_signature') if fin else None
+    if not pills and (sig is None or sig == TL.keys_signature(dict(tl, keys=[]))):
+        return
+    if not fin:
+        return  # 'finish' already FAILs
+    if sig is None:
+        add('WARN', 'key pills', 'finish.json predates key pills: run ev2 finish')
+    elif sig != TL.keys_signature(tl):
+        add('FAIL', 'stale keys', 'key pills changed after the last finish: run ev2 finish again')
+    elif pills and not fin.get('keys_drawn'):
+        add('WARN', 'key pills', f'{len(pills)} pills listed but not drawn (finish ran with --no-keys or --raw-body)')
+    else:
+        add('PASS', 'key pills', f'{len(pills)} pills drawn')
+
+
+DESC_TS = re.compile(r'^\d{1,2}:\d{2}(:\d{2})? ')
+
+
+def check_description(vd):
+    """out/youtube-description.md (from `ev2 describe`): WARN only, never FAIL."""
+    text = open('out/youtube-description.md', encoding='utf-8').read()
+    slots, n, parts, todo = text.count('<!-- WRITE'), len(text), [], []
+    name = os.path.basename(vd)
+    if slots:
+        parts.append(f'{slots} slots to write')
+    if n > 5000:
+        parts.append(f'{n} chars (> 5000)')
+    lines = [l.strip() for l in text.splitlines()]
+    block = []
+    for k, l in enumerate(lines):
+        if l.startswith('00:00 '):
+            for x in lines[k:]:
+                if not DESC_TS.match(x):
+                    break
+                block.append(x)
+            break
+    if os.path.isfile('out/youtube-chapters.txt'):
+        want = [l.strip() for l in open('out/youtube-chapters.txt', encoding='utf-8') if l.strip()]
+        if block != want:
+            parts.append('chapters outdated')
+            todo.append(f'run ev2 describe {name} --force')
+    else:
+        parts.append('no out/youtube-chapters.txt to compare')
+        todo.append('run ev2 finish')
+    if slots:
+        todo.append(f'fill the <!-- WRITE --> slots, then ev2 describe {name} --check')
+    elif n > 5000:
+        todo.append(f'shorten it, then ev2 describe {name} --check')
+    if parts:
+        add('WARN', 'description', '; '.join(parts) + ': ' + '; '.join(todo))
+    else:
+        add('PASS', 'description', f'ready ({n} chars)')
+
+
 def main():
     vd = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else '.')
     os.chdir(vd)
@@ -252,6 +319,8 @@ def main():
             add('FAIL', 'inserts', '; '.join(problems))
         else:
             add('PASS', 'inserts', f'{len(ins_list)} inserts rendered, FINAL, right length')
+
+    check_keys(tl, fin)
 
     # final.mp4
     info = probe('out/final.mp4') if os.path.isfile('out/final.mp4') else None
@@ -378,6 +447,9 @@ def main():
         add('WARN' if probs else 'PASS', 'YouTube chapters', '; '.join(probs) if probs else f'{len(ch)} chapters')
     else:
         add('WARN', 'YouTube chapters', 'work/chapters.json missing')
+
+    if os.path.isfile('out/youtube-description.md'):
+        check_description(vd)
 
     # loudness
     r = subprocess.run(['ffmpeg', '-nostdin', '-i', 'out/final.mp4', '-af', 'ebur128=peak=true', '-f', 'null', '-'],

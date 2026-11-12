@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # new-video.sh — start a new Editor V2 hybrid tutorial video from an Omarchy recording.
 #
-#   bash <skill>/scripts/new-video.sh <recording|--latest> [name] [--dir <parent>]
+#   bash <skill>/scripts/new-video.sh <recording|--latest> [name] [--dir <parent>] [--style calm|documentary]
 #
 #   <recording>  the talking-head / screencast recording (.mov / .mp4 / .mkv), 16:9
 #   --latest     auto-detect the newest screenrecording-*.mp4 (or *.mp4) in ~/Videos
 #   [name]       folder name; default: today's date + normalized source filename
 #   --dir        where videos live; default: ~/editor-v2/videos
+#   --style      hook style: documentary (default, fast montage) or calm (title card + screencast)
 #
 # Creates <parent>/<name>/ with
-#   build.py  PLAN.md  kit.json        the template starter and skill pointer
+#   build.py  PLAN.md  kit.json        the template starter (calm: template/build_calm.py), skill pointer, style
 #   assets/ev1/                        tokens.css, fonts/, vendor/gsap.min.js
 #   assets/media/src.<ext>             the recording (hard-linked or copied)
 #   assets/media/cam_raw.mp4           raw 30 fps CFR (keyframe every 1s, bt709)
@@ -21,7 +22,7 @@ SK="$(cd "$(dirname "$0")/.." && pwd)"
 source "$SK/scripts/env.sh"
 
 if [ $# -eq 0 ]; then
-  echo "usage: new-video.sh <recording|--latest> [name] [--dir parent]" >&2
+  echo "usage: new-video.sh <recording|--latest> [name] [--dir parent] [--style calm|documentary]" >&2
   exit 1
 fi
 
@@ -48,14 +49,20 @@ else
   REC="$REC_ARG"
 fi
 
-NAME=""; PARENT="$HOME/editor-v2/videos"
+NAME=""; PARENT="$HOME/editor-v2/videos"; STYLE="documentary"
 while [ $# -gt 0 ]; do
   case "$1" in
     --dir) PARENT="$2"; shift 2;;
+    --style) STYLE="${2:-}"; shift $(( $# > 1 ? 2 : 1 ));;
+    --style=*) STYLE="${1#--style=}"; shift;;
     *) NAME="$1"; shift;;
   esac
 done
 
+case "$STYLE" in
+  calm|documentary) ;;
+  *) echo "new-video: error: --style must be calm or documentary (got '$STYLE')" >&2; exit 1;;
+esac
 [ -f "$REC" ] || { echo "new-video: error: no such file: $REC" >&2; exit 1; }
 [ -s "$SK/assets/vendor/gsap.min.js" ] || { echo "new-video: error: GSAP missing: run scripts/doctor.sh first" >&2; exit 1; }
 
@@ -70,7 +77,8 @@ mkdir -p "$VD"/assets/{ev1,media,img,clips,captures,music} "$VD"/work/tx "$VD"/o
 cp "$SK/assets/tokens.css" "$VD/assets/ev1/"
 cp -R "$SK/assets/fonts" "$SK/assets/vendor" "$VD/assets/ev1/"
 cp "$SK/template/build.py" "$SK/template/PLAN.md" "$SK/template/inserts.py" "$VD/"
-printf '{\n  "skill": "%s",\n  "created": "%s"\n}\n' "$SK" "$(date +%Y-%m-%d)" > "$VD/kit.json"
+if [ "$STYLE" = calm ]; then cp "$SK/template/build_calm.py" "$VD/build.py"; fi
+printf '{\n  "skill": "%s",\n  "created": "%s",\n  "style": "%s"\n}\n' "$SK" "$(date +%Y-%m-%d)" "$STYLE" > "$VD/kit.json"
 
 ext="${REC##*.}"
 ln "$REC" "$VD/assets/media/src.$ext" 2>/dev/null || cp "$REC" "$VD/assets/media/src.$ext"

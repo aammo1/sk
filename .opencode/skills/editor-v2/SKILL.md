@@ -1,6 +1,6 @@
 ---
 name: editor-v2
-description: "Edits Omarchy screencast recordings (Moroccan Darija + English tech terms, corner webcam) into a YouTube tutorial: a code-rendered documentary hook (HyperFrames + GSAP devices, BiDi Darija captions), a silence-trimmed screencast body with optional short animated explainer inserts (motion graphics) inside it, one synced final.mp4, a Concat (or Kdenlive) project for hand finishing, a 9:16 Short and YouTube chapters, all checked by a definition-of-done verifier. Use when the user wants to edit, cut, caption or finish a recording/screencast/tutorial video, or mentions ev2, editor-v2, the hook, explainer insert, motion graphics, animated explanation, Concat or Kdenlive projects for a video."
+description: "Edits Omarchy screencast recordings (Moroccan Darija + English tech terms, corner webcam) into a YouTube tutorial: a code-rendered documentary hook (HyperFrames + GSAP devices, BiDi Darija captions), a silence-trimmed screencast body with optional short animated explainer inserts (motion graphics) inside it, one synced final.mp4, a Concat (or Kdenlive) project for hand finishing, a 9:16 Short and YouTube chapters, all checked by a definition-of-done verifier, plus an optional calm title-card style, key-press pills and a YouTube description writer. Use when the user wants to edit, cut, caption or finish a recording/screencast/tutorial video, or mentions ev2, editor-v2, the hook, explainer insert, motion graphics, animated explanation, Concat or Kdenlive projects for a video, key pills, shortcut overlay, calm style, title card, youtube description."
 ---
 
 # Editor V2 — Darija screencast → YouTube tutorial
@@ -62,16 +62,17 @@ Doctor must end with `All set`. A `MISSING` line is a blocker, so fix it before 
 
 | # | Command | Produces | Agent does |
 |---|---|---|---|
-| 1 | `ev2 init <file\|--latest> [name]` | `~/editor-v2/videos/<name>/` with `assets/media/{src.*,cam_raw.mp4,vo.wav}`, `work/omarchy.json`, `build.py`, `PLAN.md` | Confirm with the user which recording. |
+| 1 | `ev2 init <file\|--latest> [name] [--style calm]` | `~/editor-v2/videos/<name>/` with `assets/media/{src.*,cam_raw.mp4,vo.wav}`, `work/omarchy.json`, `build.py`, `PLAN.md` | Confirm with the user which recording. `--style calm` only if the creator chose it (see Optional extras). |
 | 2 | `ev2 transcribe <dir>` | `work/tx/words.json`, `work/timeline.json`, `work/cuts-report.md` | Model: `$EV2_WHISPER_MODEL` if set (the Darija fine-tune, see Setup), else `large-v3-turbo` (slow on CPU, 1.6 GB first download). `--model small` gives a quick draft. Language defaults to `ar`. Never use `auto` for Darija: it misdetects (a real test came out as Czech and Romanian). Refuses to overwrite a hand-corrected `words.json`; `--force` re-transcribes and keeps a `words.json.bak-<time>`. |
 | 3 | **PLAN gate** (see below) | filled `PLAN.md`, chapters in `timeline.json` | **STOP and get explicit approval.** |
 | 4 | edit `build.py`, then `ev2 build <dir>` | `out/render.mp4` (the hook) | One code block per PLAN beat. Assets go in `work/assets.json`. The best and rights-free material is **the recording itself**: export stills with `ffmpeg -ss T -i assets/media/cam_raw.mp4 -frames:v 1 assets/img/x.jpg`, crop the face with the webcam box from `work/activity.npz`, and use `screen_zoom` on `cam_raw.mp4`. Keep the hook short (15–25 s): end `hook_split` where the intro ends. If the transcript is unreliable, use display keywords you know are true instead of word captions. Look at a contact sheet of the render before finishing. |
 | 5 | `FINAL=1` check: `ev2 build <dir> --final` | refuses while placeholders, missing assets or `example()` template beats remain | Required: verify FAILs unless the last hook build was `--final`. |
 | 5b | `ev2 inserts <dir> [--final]` | `work/inserts/<name>.mp4\|.mov` | Only if PLAN.md lists inserts. One @scene per insert in inserts.py; times are local; keep each 4–12 s; --final before publishing. Flags: `--only NAME`, `--force`. |
 | 6 | `ev2 finish <dir>` | all outputs above, then verify | Read `out/verify.md`. |
+| 7 | `ev2 describe <dir>` | `out/youtube-description.md` | Optional. Fill every `<!-- WRITE -->` slot from `work/description-notes.md`, then `--check`. |
 
 `ev2 finish --editor concat|kdenlive|both|none` (default `concat`, or `EV2_EDITOR`).
-Other flags: `--captions`, `--no-zoom`, `--no-cam`, `--raw-body` (plain cuts, the fastest),
+Other flags: `--captions`, `--no-keys` (skip the key pills for this run, also when they are invalid), `--no-zoom`, `--no-cam`, `--raw-body` (plain cuts, the fastest),
 `--no-voice-fx`, `--no-bed`, `--song FILE`, `--bed-under LU`, `--body-music` / `--no-body-music`, `--body-under LU`, `--lufs -14`, `--no-open`. The body render is cached and is only
 redone when cuts, chapters, captions or the zoom plan change.
 
@@ -81,6 +82,7 @@ redone when cuts, chapters, captions or the zoom plan change.
 - `segments`: the body's kept source ranges (long pauses shortened, frame-quantized). Tune with `ev2 clean <dir> --keep 0.3 --busy-keep 1.2 --max-silence 0.6`.
 - `chapters`: `[{"src_t": <source seconds>, "title": "..."}]`, written by you or the agent at the PLAN gate. finish maps them through the cuts. Never invent chapters.
 - `inserts`: `[{"name": "order-flow", "src_t": 135.2, "dur": 8, "mode": "over", "cam": true}]`. `name` kebab-case, unique; `src_t` SOURCE seconds (≥ `hook_split`; inside a cut it snaps forward like chapters); `dur` FINAL seconds, 1.5–30; `mode` `full` (opaque, 9-frame crossfade in/out) or `over` (transparent, over the dimmed, blurred screencast); `cam` (default true) keeps the webcam PiP on top. No overlaps, none past the body end. Scenes live in `inserts.py` (`@scene('<name>') def fn(c, ins)`, helpers `words(ins)`, `asset`, `ph`, `example`, `hype_slide(deck, slide)`; see `reference/devices.md`). `ev2 finish` composites them, mixes their SFX into the body audio, and refuses `--raw-body` when inserts exist.
+- `keys` (optional key pills): `[{"src_t": 46.0, "keys": "Super + Space", "label": "then type the name", "dur": 2.5, "sfx": true, "pos": "bottom"}]`. `src_t` SOURCE seconds (≥ `hook_split`); `keys` "A + B" or a list, 1–4 keys of ≤ 12 chars; `label` ≤ 40 chars, Darija OK; `dur` 0.8–8 s (default 2.5); `sfx` (default true) mixes a soft key click into the body audio; `pos` `bottom`|`top`. Pills may not overlap; one near the body end is shortened. `ev2 finish` draws them over the PiP and inserts, under chapter cards, raised when captions are on; not drawn with `--raw-body`. Chapter cards cover a bottom pill, so avoid the first ~3.6 s of a chapter.
 
 Retakes are **reported, not cut**, by default: Darija repeats phrases on purpose. To cut one, set
 `"enabled": true` on it in `work/cuts.json`, then run `ev2 clean <dir>`. `ev2 clean <dir> --retakes` enables all of them.
@@ -97,9 +99,28 @@ in PLAN.md's **Approval** section:
 5. Body chapters: at least 3 including 00:00, each at least 10 s.
 6. Every third-party asset licensed, unclear rights flagged (`reference/sourcing.md` › Rights).
 7. Explainer inserts: moment (source time), duration, mode, what it shows — or none.
+8. The optional extras below: each ticked or explicitly declined.
 
 Do not run `ev2 build` before approval. If the user changes cuts later, re-run `ev2 clean` and
 then `ev2 finish`. Re-run `ev2 build` too if `hook_split` changed.
+
+### Optional extras (the creator chooses; never on by default)
+Offer these as choices at the PLAN gate. Never enable an extra the creator did not tick. Without them
+the outputs are exactly the same as before.
+- **Calm style** (title card, then the screencast as recorded, for plain walkthroughs): `ev2 init <rec> [name] --style calm`,
+  or `ev2 style <dir> calm` for an existing video (a modified `build.py` is first backed up as `build.py.bak-<date>`;
+  `kit.json` records `"style"`). Off: `ev2 style <dir> documentary` (the default). Template `template/build_calm.py`:
+  `title_card` for ~4.5 s, then `cam_raw.mp4` until the hook split; optional `shortcut_pill` beats; screenshots from
+  optional `thumb1`/`thumb2` keys in `work/assets.json`. Set the hook split at the end of the spoken intro (5–15 s).
+- **Key pills** (shortcut overlays on the body, cheaper than an insert): `ev2 keys <dir>` writes suggestions to
+  `work/keys-suggest.md|.json` from the transcript (Latin or Arabic-script key names) and never edits the timeline.
+  Copy the agreed ones into `"keys"` (see the timeline section), then `ev2 finish`. Off: remove `"keys"`, or `--no-keys` for one run.
+- **YouTube description**: after `ev2 finish`, `ev2 describe <dir> [--lang darija|en|fr] [--apps a,b]` writes
+  `out/youtube-description.md` (summary slot, one slot per chapter, the chapters, a setup line from
+  `omarchy-version`/os-release + `pacman -Q` of `--apps`, recording date, sources from PLAN.md + the music credit)
+  and `work/description-notes.md` (transcript per chapter). Fill every `<!-- WRITE ... -->` slot from the notes only
+  (no invented facts), then `ev2 describe <dir> --check` (exit 0 = ready). It refuses to overwrite an edited
+  description without `--force`. Off: don't run it (verify adds a `description` line only when the file exists).
 
 ### Definition of done
 A video is done **only** when `ev2 finish` (or `ev2 verify <dir>`) prints `DONE` and nothing
@@ -113,6 +134,8 @@ in `out/verify.md` is FAIL:
 - Every insert is rendered FINAL, has the right frame count, and nothing changed since `ev2 finish`. Picture sync skips insert ranges.
 - `hook.mp4` = `hook_split` long. The Concat/Kdenlive project has the same cuts and is not stale. For Concat, the project is opened headless with `concat --mcp headless`.
 - `short.mp4` is 1080x1920 and at most 60 s.
+- When `keys` are listed: the pills are valid, drawn, and unchanged since `ev2 finish` (else `stale keys`).
+- `out/youtube-description.md`, if it exists, gets a WARN-only `description` line (slots left, over 5000 chars, outdated chapters).
 
 The WARN lines must be reported to the user, never hidden: YouTube chapter rules not met,
 loudness outside −16..−12 LUFS, a sync check that found nothing clear enough to measure. Never say
@@ -138,6 +161,10 @@ loudness outside −16..−12 LUFS, a sync check that found nothing clear enough
 | verify: `inserts` FAIL | `ev2 inserts <dir> --final`, then `ev2 finish <dir>`. |
 | verify: `stale inserts` | `ev2 finish <dir>`. |
 | `finish: inserts need the polished body` | Drop `--raw-body`. |
+| verify: `stale keys` / `WARN key pills` (not drawn) | `ev2 finish <dir>` (without `--no-keys`/`--raw-body`). |
+| `describe: no chapters yet` | Run `ev2 finish <dir>` first. |
+| `describe: ... was edited` | `--force` only if the creator agrees to lose the edits. |
+| verify: `WARN description` | Fill the `<!-- WRITE -->` slots, then `ev2 describe <dir> --check`; outdated chapters: `--force`; too long: shorten. |
 | concat-gen: `open in Concat` | Close the project in Concat, then re-run (`ev2 concat <dir>`). |
 
 Concat project (`concat --project <dir>/out/concat`):
@@ -154,7 +181,7 @@ generation, the old file is kept first as `concat.json.bak-<time>`.
 ## Video folder
 ```text
 <dir>/
-├── build.py  PLAN.md  kit.json  index.html  sfx-cues.txt
+├── build.py  PLAN.md  kit.json  index.html  sfx-cues.txt  build.py.bak-* (ev2 style)
 ├── inserts.py  insert-<name>.html          (explainer inserts)
 ├── assets/media/   src.* (original)  cam_raw.mp4 (1920x1080 30 CFR)  vo.wav (48k 24-bit stereo)
 ├── assets/ev1/     tokens.css fonts/ vendor/gsap.min.js     assets/img|clips|captures/
@@ -164,7 +191,8 @@ generation, the old file is kept first as `concat.json.bak-<time>`.
 │          vo_clean.wav  body_voice.wav  final_audio.wav  activity.npz  zoom_plan.json
 │          body_video.mp4  final.filtergraph  finish.json  concat-gen.json
 │          inserts/{<name>.mp4|.mov,<name>.cues.txt,<name>.json}  body_cues.txt  body_mix.wav
-└── out/   render.mp4  hook.mp4  final.mp4  short.mp4  youtube-chapters.txt  captions.srt
+│          keys-suggest.md|.json  description-notes.md  description.json   (optional extras)
+└── out/   render.mp4  hook.mp4  final.mp4  short.mp4  youtube-chapters.txt  captions.srt  youtube-description.md
            concat/concat.json  project.kdenlive (optional)  verify.md  verify.json
 ```
 

@@ -7,7 +7,7 @@ SELF="$(readlink -f "${BASH_SOURCE[0]}")"
 SK="$(cd "$(dirname "$SELF")/.." && pwd)"
 source "$SK/scripts/env.sh"
 
-VERSION="editor-v2 2.3.0"
+VERSION="editor-v2 2.4.0"
 
 usage() {
   cat <<'EOF'
@@ -15,7 +15,8 @@ Usage: ev2 <command> [arguments...]
 
 Pipeline (in order):
   doctor [--install-speech]        Check/install everything; links ev2 into ~/.local/bin
-  init <file|--latest> [name]      New video dir from a recording (cam_raw.mp4, vo.wav, omarchy.json)
+  init <file|--latest> [name] [--style calm]
+                                   New video dir from a recording (cam_raw.mp4, vo.wav, omarchy.json)
   transcribe <dir> [--model M] [--windowed] [--force]
                                    Whisper words -> snap onsets -> clean (writes work/timeline.json);
                                    --force replaces a hand-corrected words.json (backup kept)
@@ -24,9 +25,16 @@ Pipeline (in order):
   build <dir> [--final]            build.py -> hf lint -> hf render out/render.mp4 (--final: FINAL=1)
   inserts <dir> [--final] [--only NAME] [--force]
                                    Explainer inserts: inserts.py scenes -> work/inserts/*.mp4|.mov
-  finish <dir> [--editor concat|kdenlive|both|none]
+  finish <dir> [--editor concat|kdenlive|both|none] [--no-keys]
                                    final.mp4 + hook.mp4 + editor project + Short + chapters, then verify
   verify <dir>                     Definition-of-done check -> out/verify.md (exit 1 = not done)
+
+Optional extras (off unless you ask):
+  style <dir> calm|documentary     Switch the hook: calm title card + screencast, or the documentary montage
+  keys <dir>                       Suggest key pills from the transcript -> work/keys-suggest.md
+                                   (copy the ones you want into "keys" in work/timeline.json)
+  describe <dir> [--lang darija|en|fr] [--apps a,b] [--force] [--check]
+                                   YouTube description frame -> out/youtube-description.md
 
 Tools:
   concat <dir>                     (Re)generate the Concat project out/concat/concat.json
@@ -72,6 +80,9 @@ case "$CMD" in
   inserts)    need_dir "$@"; exec "$EV2_PY" "$SK/scripts/render-inserts.py" "$@" ;;
   finish)     need_dir "$@"; exec "$EV2_PY" "$SK/scripts/finish.py" "$@" ;;
   verify)     need_dir "$@"; exec "$EV2_PY" "$SK/scripts/verify.py" "$@" ;;
+  style)      need_dir "$@"; exec bash "$SK/scripts/set-style.sh" "$@" ;;
+  keys)       need_dir "$@"; exec "$EV2_PY" "$SK/scripts/keys-suggest.py" "$@" ;;
+  describe)   need_dir "$@"; exec "$EV2_PY" "$SK/scripts/describe.py" "$@" ;;
   concat)     need_dir "$@"; exec "$EV2_PY" "$SK/scripts/concat-gen.py" "$@" ;;
   kdenlive)   need_dir "$@"; exec "$EV2_PY" "$SK/scripts/kdenlive-gen.py" "$@" ;;
   short)      exec "$EV2_PY" "$SK/scripts/short-extract.py" "$@" ;;

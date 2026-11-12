@@ -10,16 +10,20 @@
 - [ ] Hook beats table complete, every beat has a real asset or an agreed placeholder
 - [ ] Body chapters written to `work/timeline.json` (>= 3 incl. the hook, each >= 10 s)
 - [ ] Explainer inserts agreed (each: source time, duration, mode, what it shows), or "none"
+- [ ] Style chosen: documentary (default) or calm (`ev2 style <dir> calm`)
+- [ ] Key pills: none, or listed in "keys" (start from `ev2 keys <dir>` suggestions)
+- [ ] YouTube description: no, or yes (`ev2 describe <dir> --lang ...` after finish)
 - [ ] Body music decided: quiet music under the whole tutorial, yes or no (`"body_music": true` in `work/timeline.json`)
 - [ ] Every third-party asset in the Sources table has a licence; unclear rights flagged
 - [ ] **Creator approved on:** ____ (no `ev2 build` render before this line is filled)
 
 ## Video Metadata
 - **Title:** <!-- Video title -->
+- **Style:** documentary
 - **Target Length:** ~8 minutes (a 15–25 s fast documentary Hook + the cleaned screencast tutorial body)
 - **Spoken Language:** Moroccan Darija (الدارجة المغربية) code-switching with English technical terms
 - **Recording Source:** Omarchy screencast with 8:9 corner webcam overlay (`assets/media/src.mp4`)
-- **Music Bed:** Procedural pulse bed (`sfx/ev1kit/bed_pulse.wav` via `bed-mix.py`) — under the hook only; the body is voice only
+- **Music:** built-in tutorial music (synth-music.py) under the hook; under the body only if "body_music" is true
 - **ASR & Dictionary:** Faster-Whisper INT8 with `reference/darija-guide.md` phonetic tech mappings
 
 ---
@@ -80,6 +84,15 @@
 
 ---
 
+## Key Pills (optional, -> `work/timeline.json` "keys")
+<!-- Shortcut overlays on the body. Start from `ev2 keys <dir>`; keep only the ones that help. -->
+
+| Source time (s) | keys | label | dur |
+|---|---|---|---|
+| 46.0 *(example)* | Super + Space | then type the name | 2.5 |
+
+---
+
 ## Sources, Assets & Licences
 <!-- Verify every claim, number, and repo on its real page.
      Record URLs, commit hashes, licences, and flags for commentary attribution. -->
@@ -87,7 +100,7 @@
 | Beat / Item | Material Description | Source (URL or Path) | Licence / Rights | Flag / Notes |
 |---|---|---|---|---|
 | sound | Kit synthesized SFX | `scripts/synth-sfx.py` | Own synthesis (no third-party audio) | Procedural code synthesis |
-| music bed | Procedural pulse bed | `sfx/ev1kit/bed_pulse.wav` | Free / Included | Procedural mix |
+| music | Built-in tutorial music | `scripts/synth-music.py` | Own synthesis | Under the hook; under the body only if "body_music" is true |
 | screen | Omarchy desktop capture | `assets/media/src.mp4` | Creator Original | 1080p 30fps CFR |
 | brand | Official tool / framework logos | Wikimedia Commons / Official SVG | Trademark (identify only; see sourcing.md › Rights) | Rebuilt via `svg_mark` |
 | docs | Official documentation pages | Tool docs / GitHub repository | Permissive / Docs | Captured via `capture.mjs` |

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """body_render.py — the polished tutorial body: auto zooms, styled webcam, chapter cards, captions.
 
-    body_render.py <video-dir> [--no-zoom] [--no-cam] [--captions] [--plan-only]
+    body_render.py <video-dir> [--no-zoom] [--no-cam] [--captions] [--no-keys] [--plan-only]
 
 1. analyze(): screen activity of assets/media/cam_raw.mp4 at 5 fps (what changes where:
    typing, pointing, menus, page loads) + where the Omarchy webcam is (face tracking at 1 fps,
@@ -14,7 +14,8 @@
    from timeline.json, optional burned-in captions. Explainer inserts (timeline.json "inserts",
    renders in work/inserts/) replace the picture (full) or are drawn over a dimmed, blurred
    picture (over), with the webcam PiP kept on top. -> work/body_video.mp4 (silent, exact
-   frame count), cached against all of its inputs.
+   frame count), cached against all of its inputs. Key pills (opt-in via "keys" in
+   timeline.json, skipped with --no-keys) are drawn over the PiP, under the chapter cards.
 """
 import argparse, hashlib, json, math, os, subprocess, sys
 
@@ -421,6 +422,62 @@ def chapter_card(number, title):
     return img
 
 
+PILL_PAD = 36                # transparent margin around the pill for its shadow
+
+
+def key_pill(keys, label='', max_w=1000):
+    """Dark glass pill: keycaps joined by "+", optional label (left of the keys when Darija)."""
+    ks, ps, ls = 34, 26, 30
+    while True:
+        fk, fp = font(ks, True), font(ps, True)
+        d = ImageDraw.Draw(Image.new('L', (1, 1)))
+        caps = [(k, d.textlength(k, font=fk)) for k in keys]
+        plus_w = d.textlength('+', font=fp)
+        cap_h = ks + 2 * 10 + 6
+        keys_w = sum(w + 36 for _, w in caps) + (len(caps) - 1) * (plus_w + 24)
+        ml = Mixed(label, ls) if label else None
+        content_w = keys_w + (18 + ml.width if ml else 0)
+        w, h = int(content_w) + 2 * 22, cap_h + 2 * 16
+        if w <= max_w or ks <= 20:
+            break
+        ks, ps, ls = ks - 2, ps - 2, ls - 2
+    pad = PILL_PAD
+    img = Image.new('RGBA', (w + 2 * pad, h + 2 * pad), (0, 0, 0, 0))
+    sh = Image.new('RGBA', img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(sh).rounded_rectangle((pad, pad + 8, pad + w, pad + h + 8), 22, fill=(0, 0, 0, 150))
+    img = Image.alpha_composite(img, sh.filter(ImageFilter.GaussianBlur(16)))
+    box = Image.new('RGBA', img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(box).rounded_rectangle((pad, pad, pad + w, pad + h), 22, fill=(14, 14, 20, 225),
+                                          outline=(255, 255, 255, 40), width=2)
+    img = Image.alpha_composite(img, box)
+    # translucent caps and text go on their own layers: ImageDraw replaces RGBA pixels, it does not blend
+    cap_l, txt_l = Image.new('RGBA', img.size, (0, 0, 0, 0)), Image.new('RGBA', img.size, (0, 0, 0, 0))
+    dc, dt = ImageDraw.Draw(cap_l), ImageDraw.Draw(txt_l)
+    cy = pad + h / 2
+    x = pad + 22
+    if ml and ml.rtl:
+        ml.draw(dt, x, cy - ls * 0.92, (229, 231, 235, 255))
+        x += ml.width + 18
+    for j, (k, kw) in enumerate(caps):
+        if j:
+            dt.text((x + 12 + plus_w / 2, cy), '+', font=fp, fill=(255, 255, 255, 115), anchor='mm')
+            x += plus_w + 24
+        dc.rounded_rectangle((x, cy - cap_h / 2, x + kw + 36, cy + cap_h / 2), 10,
+                             fill=(255, 255, 255, 26), outline=(255, 255, 255, 70), width=2)
+        dt.text((x + 18 + kw / 2, cy), k, font=fk, fill=(255, 255, 255, 255), anchor='mm')
+        x += kw + 36
+    if ml and not ml.rtl:
+        ml.draw(dt, x + 18, cy - ls * 0.92, (229, 231, 235, 255))
+    return Image.alpha_composite(Image.alpha_composite(img, cap_l), txt_l)
+
+
+def pill_y(pill_h, pos, captions):
+    """Top of the pill image (shadow margin included) for its position."""
+    if pos == 'top':
+        return 90 - PILL_PAD
+    return H - (230 if captions else 110) - (pill_h - 2 * PILL_PAD) - PILL_PAD
+
+
 def caption_img(text, max_w=1380, size=46):
     lines, cur = [], ''
     for wd in text.split():
@@ -563,9 +620,13 @@ def composite_insert(out_f, fr, mode, a):
     return (base * (1 - al) + fr[..., :3].astype(np.float32) * al).astype(np.uint8)
 
 
-def render(vd, zoom=True, cam=True, captions=False, force=False, preset='veryfast', crf=16):
+def render(vd, zoom=True, cam=True, captions=False, force=False, preset='veryfast', crf=16, keys=True):
     tl = TL.load(vd)
     segs = TL.body_segments(tl)
+    try:
+        pills = TL.key_ranges(tl) if keys else []
+    except TL.TimelineError as e:
+        raise SystemExit(f'body: {e} (edit "keys" in work/timeline.json, or run with --no-keys)')
     ins_list = TL.insert_ranges(tl)
     ins_paths = [TL.insert_render_path(vd, ins) for ins in ins_list]
     for ins, p in zip(ins_list, ins_paths):
@@ -585,6 +646,8 @@ def render(vd, zoom=True, cam=True, captions=False, force=False, preset='veryfas
     parts = [PLAN_VERSION, TL.cut_signature(tl), plan['keys'], chapters, caps, cam, st.st_size, int(st.st_mtime)]
     if ins_list:
         parts.append([(ins, os.path.getsize(p), int(os.path.getmtime(p))) for ins, p in zip(ins_list, ins_paths)])
+    if pills:
+        parts.append(['pills', pills])
     key = hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()[:16]
     if not force and os.path.isfile(out) and os.path.isfile(stamp_p) and json.load(open(stamp_p)).get('key') == key:
         log(f'body_video.mp4 is up to date ({plan["zoomed_share"] * 100:.0f}% zoomed)')
@@ -600,6 +663,10 @@ def render(vd, zoom=True, cam=True, captions=False, force=False, preset='veryfas
                  if os.path.isfile(hc) else 0)
     ch_imgs = [(t, to_rgba_np(chapter_card(f'{first + i:02d}', title))) for i, (t, title) in enumerate(chapters)]
     cap_imgs = [(s, e, to_rgba_np(caption_img(txt))) for s, e, txt in caps]
+    pill_imgs = []
+    for pl in pills:
+        img = key_pill(pl['keys'], pl['label'])
+        pill_imgs.append((pl, (W - img.width) // 2, pill_y(img.height, pl['pos'], captions), to_rgba_np(img)))
 
     enc = subprocess.Popen(['ffmpeg', '-nostdin', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'bgr24',
                             '-s', f'{W}x{H}', '-r', str(FPS), '-i', '-', '-c:v', 'libx264', '-preset', preset,
@@ -609,8 +676,9 @@ def render(vd, zoom=True, cam=True, captions=False, force=False, preset='veryfas
     cur_src, frame = -1, None
     log(f'rendering {n} frames ({n / FPS:.1f}s): {plan["zoomed_share"] * 100:.0f}% zoomed, '
         f'{len(ch_imgs)} chapter cards, {len(cap_imgs)} captions, webcam PiP {"on" if pip else "off"}'
-        + (f', {len(ins_list)} inserts' if ins_list else ''))
-    ii, reader = 0, None
+        + (f', {len(ins_list)} inserts' if ins_list else '')
+        + (f', {len(pills)} key pills' if pills else ''))
+    ii, reader, pi = 0, None, 0
     for i in range(n):
         sf = int(src_list[i])
         while cur_src < sf:
@@ -646,6 +714,14 @@ def render(vd, zoom=True, cam=True, captions=False, force=False, preset='veryfas
                     pip.draw(out_f, src, box)
                 else:
                     pip.draw(out_f, src, box, cover=False)
+        while pi < len(pill_imgs) and i >= pill_imgs[pi][0]['f0'] + pill_imgs[pi][0]['n']:
+            pi += 1
+        if pi < len(pill_imgs) and pill_imgs[pi][0]['f0'] <= i:
+            pl, px, py, (bgr, al) = pill_imgs[pi]
+            k, pn = i - pl['f0'], pl['n']
+            u = min(1.0, (k + 1) / 5)
+            a = min(u, (pn - k) / 5)
+            blend(out_f, bgr, al, px, py + int(round(14 * (1 - u) ** 3)), a)
         for ct, (bgr, al) in ch_imgs:
             dt = t - ct
             if -0.01 <= dt <= 3.6:
@@ -662,8 +738,11 @@ def render(vd, zoom=True, cam=True, captions=False, force=False, preset='veryfas
     if enc.wait():
         raise SystemExit('body: encoding body_video.mp4 failed')
     os.replace(out + '.tmp.mp4', out)
-    json.dump({'key': key, 'frames': n, 'zoomed_share': plan['zoomed_share'],
-               'inserts': [ins['name'] for ins in ins_list]}, open(stamp_p, 'w'))
+    stamp = {'key': key, 'frames': n, 'zoomed_share': plan['zoomed_share'],
+             'inserts': [ins['name'] for ins in ins_list]}
+    if pills:
+        stamp['pills'] = len(pills)
+    json.dump(stamp, open(stamp_p, 'w'))
     log(f'-> work/body_video.mp4 ({n} frames)')
     return plan
 
@@ -674,6 +753,7 @@ def main():
     ap.add_argument('--no-zoom', action='store_true')
     ap.add_argument('--no-cam', action='store_true')
     ap.add_argument('--captions', action='store_true', help='Burn captions into the body (check the transcript first)')
+    ap.add_argument('--no-keys', action='store_true', help='Skip the key pills from timeline.json for this run')
     ap.add_argument('--plan-only', action='store_true')
     ap.add_argument('--force', action='store_true')
     a = ap.parse_args()
@@ -683,7 +763,7 @@ def main():
         json.dump(p, open(os.path.join(vd, 'work', 'zoom_plan.json'), 'w'), indent=1)
         print(f'{len(p["keys"])} camera moves, {p["zoomed_share"] * 100:.0f}% of the body zoomed')
         return
-    render(vd, zoom=not a.no_zoom, cam=not a.no_cam, captions=a.captions, force=a.force)
+    render(vd, zoom=not a.no_zoom, cam=not a.no_cam, captions=a.captions, force=a.force, keys=not a.no_keys)
 
 
 if __name__ == '__main__':
