@@ -278,6 +278,9 @@ def fw_transcribe(model, audio, **kw):
         return model.transcribe(audio, **kw)
 
 
+PROBS = []      # Whisper's word probabilities, for work/tx/engine.json "mean_prob" (caption trust)
+
+
 def transcribe_fw(model, src, D, lang_arg, initial_prompt, windowed=False, hotwords=None):
     """Transcribe using faster-whisper, either directly or in 20s overlapping windows."""
     lang = None if (not lang_arg or lang_arg == 'auto') else lang_arg
@@ -314,6 +317,7 @@ def transcribe_fw(model, src, D, lang_arg, initial_prompt, windowed=False, hotwo
                             txt = w.word.strip()
                             if txt:
                                 got.append((txt, w.start + ss, w.end + ss))
+                                PROBS.append(float(getattr(w, 'probability', 0) or 0))
                 lo = 0.0 if k == 0 else ss + OVL / 2
                 hi = D + 1.0 if k == len(starts) - 1 else ss + WIN - OVL / 2
                 words += [w for w in got if lo <= w[1] < hi]
@@ -346,6 +350,7 @@ def transcribe_fw(model, src, D, lang_arg, initial_prompt, windowed=False, hotwo
                     txt = w.word.strip()
                     if txt:
                         words.append((txt, w.start, w.end))
+                        PROBS.append(float(getattr(w, 'probability', 0) or 0))
 
     return words
 
@@ -504,7 +509,10 @@ def main():
     with open(os.path.join(out_dir, 'engine.json'), 'w') as f:
         json.dump({'engine': engine_name, 'model': a.model if use_fw else None, 'language': a.language,
                    'hotwords': hot if use_fw else None, 'windowed': bool(a.windowed),
-                   'source': os.path.relpath(src, vd), 'words': len(words)}, f, indent=2, ensure_ascii=False)
+                   'source': os.path.relpath(src, vd), 'words': len(words),
+                   'mean_prob': round(sum(PROBS) / len(PROBS), 3) if PROBS else None,
+                   'low_prob_share': round(sum(1 for p in PROBS if p < 0.5) / len(PROBS), 3) if PROBS else None},
+                  f, indent=2, ensure_ascii=False)
 
     full_text = ' '.join(w['w'] for w in words)
     # Break into sentences on punctuation

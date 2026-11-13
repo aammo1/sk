@@ -177,7 +177,7 @@ def main():
     ap.add_argument('--song', default='auto', help='Music bed for the hook: a file path, or auto (built-in tutorial music)')
     ap.add_argument('--bed-under', type=float, default=13.0, help='Bed level under the voice in LU (default 13)')
     ap.add_argument('--body-music', dest='body_music', action='store_true', default=None,
-                    help='Quiet music under the whole tutorial (default: off, or "body_music" in timeline.json)')
+                    help='Quiet music under the whole tutorial (default: on, unless "body_music": false in timeline.json)')
     ap.add_argument('--no-body-music', dest='body_music', action='store_false', help='Force the body music off')
     ap.add_argument('--body-under', type=float, default=20.0, help='Body music level under the voice in LU (default 20)')
     ap.add_argument('--captions', action='store_true', help='Burn captions into the body (check the transcript first)')
@@ -289,11 +289,25 @@ def main():
             shutil.copyfile(premix, hook_audio)
         print(f'  {"bed" if not a.no_bed else "no bed"}, {n_cues} SFX cues -> {hook_audio}')
 
+    body_v = None
+    if not a.raw_body:
+        step('body picture: stage, zooms, webcam PiP, clicks, callouts, chapter cards' + (', key pills' if draw_keys else '')
+             + (', captions' if a.captions else ''))
+        import body_render
+        plan = body_render.render(vd, zoom=not a.no_zoom, cam=not a.no_cam, captions=a.captions, preset=a.preset,
+                                  keys=not a.no_keys)
+        body_v = 'work/body_video.mp4'
+        bi = probe(body_v)
+        if abs(bi.get('v_dur', 0) - body_dur) > 1.5 / FPS:
+            raise FinishError(f'body_video.mp4 is {bi.get("v_dur")}s, expected {body_dur:.3f}s')
+    elif os.path.isfile('work/body_fx_cues.txt'):
+        os.remove('work/body_fx_cues.txt')
+
     step('body audio: kept voice segments (sample-exact)')
     n = write_body_voice(voice, segs, 'work/body_voice.wav', hs)
     print(f'  {n / TL.SR:.3f}s -> work/body_voice.wav')
 
-    use_music = (tl.get('body_music', False) if a.body_music is None else a.body_music) and not a.no_bed
+    use_music = (tl.get('body_music', True) if a.body_music is None else a.body_music) and not a.no_bed
     body_base = 'work/body_voice.wav'
     if use_music:
         run([sys.executable, os.path.join(HERE, 'bed-mix.py'), '--voice', 'work/body_voice.wav', '--song', a.song,
@@ -307,10 +321,15 @@ def main():
 
     body_audio = body_base
     body_cues = insert_cue_lines(ins_list)
+    n_fx = 0
+    if body_v and os.path.isfile('work/body_fx_cues.txt'):
+        fx = [l.strip() for l in open('work/body_fx_cues.txt') if l.strip() and not l.lstrip().startswith('#')]
+        n_fx = len(fx)
+        body_cues += fx
     key_cues = [f'{max(0.0, p["body_t"] - 0.004):.3f}  ev1kit/key_click  {0.36 * 0.8:.3f}'
                 for p in pills if p['sfx']] if draw_keys else []
     if body_cues or key_cues:
-        header = '# insert SFX in body time\n'
+        header = '# insert / body fx SFX in body time\n'
         if key_cues:
             n_ins = len(body_cues)
             body_cues = sorted(body_cues + key_cues, key=lambda l: float(l.split()[0]))
@@ -321,25 +340,13 @@ def main():
              'work/body_mix.wav'], 'mix-sfx.py (insert SFX)' if not key_cues else 'mix-sfx.py (insert / key-pill SFX)')
         body_audio = 'work/body_mix.wav'
         if key_cues:
-            print(f'  {n_ins} insert SFX cues + {len(key_cues)} key clicks -> work/body_mix.wav')
+            print(f'  {n_ins - n_fx} insert SFX cues + {n_fx} body fx + {len(key_cues)} key clicks -> work/body_mix.wav')
         else:
-            print(f'  {len(body_cues)} insert SFX cues -> work/body_mix.wav')
+            print(f'  {len(body_cues) - n_fx} insert SFX cues + {n_fx} body fx -> work/body_mix.wav')
     else:
         for p in ['work/body_mix.wav', 'work/body_cues.txt']:
             if os.path.isfile(p):
                 os.remove(p)
-
-    body_v = None
-    if not a.raw_body:
-        step('body picture: zooms, webcam PiP, chapter cards' + (', key pills' if draw_keys else '')
-             + (', captions' if a.captions else ''))
-        import body_render
-        plan = body_render.render(vd, zoom=not a.no_zoom, cam=not a.no_cam, captions=a.captions, preset=a.preset,
-                                  keys=not a.no_keys)
-        body_v = 'work/body_video.mp4'
-        bi = probe(body_v)
-        if abs(bi.get('v_dur', 0) - body_dur) > 1.5 / FPS:
-            raise FinishError(f'body_video.mp4 is {bi.get("v_dur")}s, expected {body_dur:.3f}s')
 
     step(f'final audio: join + loudness to {a.lufs:g} LUFS')
     parts = []

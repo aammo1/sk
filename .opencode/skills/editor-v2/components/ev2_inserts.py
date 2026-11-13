@@ -90,9 +90,11 @@ def hype_slide(deck, slide, width=1920):
 def run(vd='.'):
     final = os.environ.get('FINAL') == '1'
     try:
-        ranges = TL.insert_ranges(TL.load(vd))
+        tl = TL.load(vd)
+        ranges = TL.insert_ranges(tl)
     except TL.TimelineError as e:
         sys.exit(f'inserts: ERROR {e}')
+    raw = {e['name']: e for e in tl.get('inserts') or []}
     if not ranges:
         print('inserts: no inserts in work/timeline.json')
         return
@@ -103,19 +105,35 @@ def run(vd='.'):
         if bad:
             sys.exit(f'inserts: unknown insert {", ".join(bad)} (in work/timeline.json: {", ".join(names)})')
         ranges = [r for r in ranges if r['name'] in only]
+    import ev2_recipes as R
+    problems = []
     for n in names:
-        if n not in _SCENES:
-            sys.exit(f'inserts: insert "{n}" is in work/timeline.json but inserts.py has no @scene("{n}")')
+        if raw[n].get('recipe'):
+            problems += R.validate(raw[n])
+            if raw[n].get('mode', 'full') != 'full':
+                problems.append(f'insert "{n}": recipes are full-screen scenes: set "mode": "full" (or remove mode)')
+        elif n not in _SCENES:
+            sys.exit(f'inserts: insert "{n}" has no "recipe" and inserts.py has no @scene("{n}"): '
+                     f'give it a recipe ({", ".join(R.RECIPES)}) in work/timeline.json')
+    if problems:
+        sys.exit('inserts: fix these in work/timeline.json:\n  - ' + '\n  - '.join(problems))
     for n in _SCENES:
         if n not in names:
             print(f'inserts: warning: @scene("{n}") is not in work/timeline.json; skipped')
+    theme = None
     os.makedirs(os.path.join(vd, 'work', 'inserts'), exist_ok=True)
     refused = []
     for ins in ranges:
         name = ins['name']
         _STATE['placeholders'], _STATE['missing'] = [], []
         c = Comp(ins['dur'], cid=f'insert-{name}')
-        _SCENES[name](c, ins)
+        if raw[name].get('recipe'):
+            if theme is None:
+                import ev2_pro as P
+                _, theme = P.ensure_look(os.path.abspath(vd))
+            R.build(c, ins, raw[name], R.Ctx(theme, words=words(ins), vd=vd))
+        else:
+            _SCENES[name](c, ins)
         ph_list, missing = list(_STATE['placeholders']), sorted(set(_STATE['missing']))
         clean = not ph_list and not missing
         status = {'placeholders': ph_list, 'missing': missing, 'final': bool(final and clean),
@@ -129,6 +147,11 @@ def run(vd='.'):
         cues = os.path.join(vd, 'work', 'inserts', f'{name}.cues.txt')
         c.write_cues(cues)
         n_cues = sum(1 for l in open(cues) if l.strip() and not l.lstrip().startswith('#')) if os.path.exists(cues) else 0
-        print(f'inserts: {name} {ins["mode"]} {ins["dur"]}s | cues {n_cues} | placeholders {len(ph_list)} | missing {len(missing)}')
+        kind = f'recipe {raw[name]["recipe"]}' if raw[name].get('recipe') else 'scene'
+        print(f'inserts: {name} {kind} {ins["mode"]} {ins["dur"]}s | cues {n_cues} | placeholders {len(ph_list)} | missing {len(missing)}')
     if refused:
         sys.exit('inserts: FINAL refused — ' + '; '.join(refused))
+
+
+if __name__ == '__main__':
+    run('.')

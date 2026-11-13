@@ -1,0 +1,2 @@
+lucide-static 1.72.0 (ISC). icon-nodes.json + tags.json, minified.
+simple-icons (CC0-1.0; brand marks remain trademarks of their owners — identify only). Curated subset in brands.json.

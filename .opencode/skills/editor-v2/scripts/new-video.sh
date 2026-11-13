@@ -76,8 +76,8 @@ VD="$PARENT/$NAME"
 mkdir -p "$VD"/assets/{ev1,media,img,clips,captures,music} "$VD"/work/tx "$VD"/out
 cp "$SK/assets/tokens.css" "$VD/assets/ev1/"
 cp -R "$SK/assets/fonts" "$SK/assets/vendor" "$VD/assets/ev1/"
-cp "$SK/template/build.py" "$SK/template/PLAN.md" "$SK/template/inserts.py" "$VD/"
-if [ "$STYLE" = calm ]; then cp "$SK/template/build_calm.py" "$VD/build.py"; fi
+cp "$SK/template/build.py" "$SK/template/PLAN.md" "$VD/"
+if [ "$STYLE" = calm ]; then printf '{\n  "recipe": "calm",\n  "promise": ""\n}\n' > "$VD/work/hook.json"; fi
 printf '{\n  "skill": "%s",\n  "created": "%s",\n  "style": "%s"\n}\n' "$SK" "$(date +%Y-%m-%d)" "$STYLE" > "$VD/kit.json"
 
 ext="${REC##*.}"
@@ -97,11 +97,15 @@ ffmpeg -nostdin -v error -stats -y -i "$VD/assets/media/src.$ext" -map 0:v:0 \
 echo "new-video: voice -> assets/media/vo.wav (48 kHz 24-bit PCM)"
 ffmpeg -nostdin -v error -y -i "$VD/assets/media/src.$ext" -map 0:a:0 -af "aresample=async=1:first_pts=0" -ac 2 -ar 48000 -c:a pcm_s24le "$VD/assets/media/vo.wav"
 
+echo "new-video: input log (cursor, clicks, shortcuts from \`ev2 rec\`) -> work/inputs.json"
+"$EV2_PY" "$SK/scripts/inputs.py" "$VD" --recording "$REC" || echo "new-video: WARNING could not read the input log; zooms will follow screen activity" >&2
+
 D=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$VD/assets/media/cam_raw.mp4" 2>/dev/null || echo "0")
 echo
 echo "new-video: workspace ready at $VD  (${D}s)"
 echo "next steps:"
-echo "  1. ev2 transcribe \"$VD\"     (words + work/timeline.json + work/cuts-report.md)"
-echo "  2. PLAN gate: review PLAN.md + work/cuts-report.md with the user"
-echo "  3. edit build.py, then: ev2 build \"$VD\""
-echo "  4. ev2 finish \"$VD\"         (final.mp4, Concat project, Short, chapters, verify)"
+echo "  1. ev2 transcribe \"$VD\"       (words + work/timeline.json + work/cuts-report.md)"
+echo "  2. PLAN gate: chapters, inserts (recipes), callouts, hook.json promise -> approval"
+echo "  3. ev2 hook \"$VD\" --final     (the designed hook from work/hook.json)"
+echo "  4. ev2 inserts \"$VD\" --final  (only if the plan has inserts)"
+echo "  5. ev2 finish \"$VD\"           (final.mp4, Concat project, Short, chapters, verify + beauty check)"

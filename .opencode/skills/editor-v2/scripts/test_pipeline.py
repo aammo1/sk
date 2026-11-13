@@ -21,6 +21,10 @@ if not os.path.isfile(PY):
 sys.path.insert(0, HERE)
 import ev2_timeline as TL  # noqa: E402
 
+# the fake hook here is a flat test pattern: the beauty check (tested in components/test_pro.py)
+# would rightly FAIL it, so this assembly test leaves it out
+os.environ['EV2_NO_BEAUTY'] = '1'
+
 PERIOD, ON = 2.3, 1.5   # a 1.5 s "word burst" every 2.3 s -> 0.8 s pauses (> 0.6 s: shortened)
 
 
@@ -187,11 +191,14 @@ def main():
     import soundfile as sf
     render(hs)
     fin_cmd = [PY, os.path.join(HERE, 'finish.py'), vd, '--editor', 'none', '--no-open', '--preset', 'ultrafast', '--raw-body', '--no-short']
-    subprocess.run(fin_cmd, capture_output=True, text=True)
-    check(not os.path.exists(os.path.join(vd, 'work/body_music.wav')), 'body music is OFF by default')
-    r = subprocess.run(fin_cmd + ['--body-music'], capture_output=True, text=True)
+    r = subprocess.run(fin_cmd, capture_output=True, text=True)
     bm, bv = os.path.join(vd, 'work/body_music.wav'), os.path.join(vd, 'work/body_voice.wav')
-    check(os.path.exists(bm) and 'quiet music under the whole body' in r.stdout, '--body-music writes work/body_music.wav')
+    check(os.path.exists(bm) and 'quiet music under the whole body' in r.stdout, 'body music is ON by default')
+    tl = TL.load(vd); tl['body_music'] = False; TL.save(vd, tl)
+    subprocess.run(fin_cmd, capture_output=True, text=True)
+    check(not os.path.exists(bm), 'timeline "body_music": false turns it off')
+    r = subprocess.run(fin_cmd + ['--body-music'], capture_output=True, text=True)
+    check(os.path.exists(bm) and 'quiet music under the whole body' in r.stdout, '--body-music overrides it')
     check(sf.info(bm).frames == sf.info(bv).frames, 'body music keeps the body audio length exactly')
     check(json.load(open(os.path.join(vd, 'work/finish.json')))['body_music'] is True, 'finish.json records body_music')
     tl = TL.load(vd); tl['body_music'] = True; TL.save(vd, tl)
@@ -282,14 +289,16 @@ def main():
     tl.pop('keys', None)
     TL.save(vd, tl)
 
-    print('\n[8] calm style')
+    print('\n[8] calm style (automatic hook, recipe "calm")')
     vc = os.path.join(root, 'vid_calm')
     shutil.copytree(vd, vc, symlinks=True)
-    tpl, tpl_calm = os.path.join(SK, 'template/build.py'), os.path.join(SK, 'template/build_calm.py')
+    tpl = os.path.join(SK, 'template/build.py')
     same = lambda p, q: open(p, 'rb').read() == open(q, 'rb').read()
     style = lambda d: json.load(open(os.path.join(d, 'kit.json'))).get('style')
+    recipe = lambda d: json.load(open(os.path.join(d, 'work/hook.json'), encoding='utf-8')).get('recipe')
     sh(['bash', os.path.join(HERE, 'set-style.sh'), vc, 'calm'])
-    check(same(os.path.join(vc, 'build.py'), tpl_calm) and style(vc) == 'calm', 'set-style calm: calm build.py, kit.json style calm')
+    check(same(os.path.join(vc, 'build.py'), tpl) and style(vc) == 'calm' and recipe(vc) == 'calm',
+          'set-style calm: automatic build.py, kit.json style calm, hook.json recipe calm')
     for f in ['index.html', 'work/build.json']:
         if os.path.exists(os.path.join(vc, f)):
             os.remove(os.path.join(vc, f))
@@ -298,17 +307,26 @@ def main():
     check(r.returncode == 0, 'calm build.py exits 0')
     bjc = os.path.join(vc, 'work/build.json')
     check(os.path.isfile(os.path.join(vc, 'index.html')) and os.path.isfile(bjc), 'calm build.py writes index.html and work/build.json')
-    check(bool(json.load(open(bjc))['placeholders']), 'calm build.json lists the template placeholders')
+    check(any('promise' in p for p in json.load(open(bjc))['placeholders']), 'build.json says the promise is missing')
     r = subprocess.run([PY, 'build.py'], cwd=vc, capture_output=True, text=True, env=dict(os.environ, FINAL='1'))
-    check(r.returncode != 0, 'calm FINAL=1 refuses while examples remain')
+    check(r.returncode != 0, 'FINAL=1 refuses while the promise is empty')
+    h = json.load(open(os.path.join(vc, 'work/hook.json'), encoding='utf-8'))
+    h['promise'] = 'Ship it in *5 min*'
+    json.dump(h, open(os.path.join(vc, 'work/hook.json'), 'w'))
+    r = subprocess.run([PY, 'build.py'], cwd=vc, capture_output=True, text=True, env=dict(os.environ, FINAL='1'))
+    check(r.returncode == 0 and json.load(open(bjc))['final'] is True, 'FINAL=1 passes once the promise is written')
     open(os.path.join(vc, 'build.py'), 'a').write('\n# hand edit\n')
     sh(['bash', os.path.join(HERE, 'set-style.sh'), vc, 'documentary'])
     import glob
     check(bool(glob.glob(os.path.join(vc, 'build.py.bak-*'))), 'set-style backs up a hand-edited build.py')
-    check(same(os.path.join(vc, 'build.py'), tpl) and style(vc) == 'documentary', 'set-style documentary: template build.py back')
+    check(same(os.path.join(vc, 'build.py'), tpl) and style(vc) == 'documentary' and recipe(vc) == 'showcase',
+          'set-style documentary: automatic build.py, recipe showcase')
+    sh(['bash', os.path.join(HERE, 'set-style.sh'), vc, 'custom'])
+    check(same(os.path.join(vc, 'build.py'), os.path.join(SK, 'template/build_custom.py')), 'set-style custom: the hand-written template')
     sh(['bash', os.path.join(HERE, 'new-video.sh'), rec, 'vid_calm_init', '--dir', root, '--style', 'calm'])
     vi = os.path.join(root, 'vid_calm_init')
-    check(style(vi) == 'calm' and same(os.path.join(vi, 'build.py'), tpl_calm), 'new-video.sh --style calm: calm build.py and kit.json style')
+    check(style(vi) == 'calm' and same(os.path.join(vi, 'build.py'), tpl) and recipe(vi) == 'calm',
+          'new-video.sh --style calm: automatic build.py, hook.json recipe calm')
     check(style(vd) == 'documentary' and same(os.path.join(vd, 'build.py'), tpl), 'default video stays documentary')
 
     print('\ntest_pipeline: ALL PASSED')

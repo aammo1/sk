@@ -7,30 +7,44 @@ SELF="$(readlink -f "${BASH_SOURCE[0]}")"
 SK="$(cd "$(dirname "$SELF")/.." && pwd)"
 source "$SK/scripts/env.sh"
 
-VERSION="editor-v2 2.4.0"
+VERSION="editor-v2 3.0.0"
 
 usage() {
   cat <<'EOF'
 Usage: ev2 <command> [arguments...]
 
+Before you record (once):
+  rec install                      Log cursor/clicks/shortcuts while Omarchy records (exact zooms + ripples)
+  rec status | rec test [S] | rec uninstall
+
 Pipeline (in order):
   doctor [--install-speech]        Check/install everything; links ev2 into ~/.local/bin
   init <file|--latest> [name] [--style calm]
-                                   New video dir from a recording (cam_raw.mp4, vo.wav, omarchy.json)
+                                   New video dir from a recording (cam_raw.mp4, vo.wav, omarchy.json, inputs.json)
   transcribe <dir> [--model M] [--windowed] [--force]
                                    Whisper words -> snap onsets -> clean (writes work/timeline.json);
                                    --force replaces a hand-corrected words.json (backup kept)
   clean <dir> [--hook-split S] [--retakes]
                                    Re-run silence/retake cutting after editing cuts.json
-  build <dir> [--final]            build.py -> hf lint -> hf render out/render.mp4 (--final: FINAL=1)
+  check <dir>                      Validate timeline.json / hook.json / look.json before rendering
+  hook <dir> [--init] [--final] [--no-render]
+                                   The designed hook from work/hook.json (--init: auto-pick the shots)
   inserts <dir> [--final] [--only NAME] [--force]
-                                   Explainer inserts: inserts.py scenes -> work/inserts/*.mp4|.mov
+                                   Explainer inserts from recipes (or inserts.py scenes) -> work/inserts/
   finish <dir> [--editor concat|kdenlive|both|none] [--no-keys]
                                    final.mp4 + hook.mp4 + editor project + Short + chapters, then verify
-  verify <dir>                     Definition-of-done check -> out/verify.md (exit 1 = not done)
+  verify <dir>                     Definition of done + beauty check -> out/verify.md (exit 1 = not done)
+
+Look:
+  look <dir> [--accent auto|#hex] [--frame inset|full] [--max-zoom Z] [--trim auto|off]
+                                   Colours/framing shared by hook, inserts and body (work/look.json)
+  beauty <dir>                     Measure how pro it looks/sounds -> out/beauty.md (verify runs it too)
+  inputs <dir> [--log F] [--offset S]
+                                   Re-read the input log into work/inputs.json
 
 Optional extras (off unless you ask):
-  style <dir> calm|documentary     Switch the hook: calm title card + screencast, or the documentary montage
+  style <dir> documentary|calm|custom
+                                   Hook style: designed montage (default), calm title card, or hand-written
   keys <dir>                       Suggest key pills from the transcript -> work/keys-suggest.md
                                    (copy the ones you want into "keys" in work/timeline.json)
   describe <dir> [--lang darija|en|fr] [--apps a,b] [--force] [--check]
@@ -39,7 +53,8 @@ Optional extras (off unless you ask):
 Tools:
   concat <dir>                     (Re)generate the Concat project out/concat/concat.json
   kdenlive <dir>                   (Re)generate out/project.kdenlive
-  body <dir> [--plan-only]         Analyze screen + plan zooms (or render the polished body alone)
+  body <dir> [--plan-only] [--preview T0,T1]
+                                   Plan zooms, render the polished body, or preview a few seconds of it
   short <in.mp4> <out.mp4> [...]   9:16 Short from a 16:9 video
   convert-model <hf-repo-id>      Make a Hugging Face Whisper fine-tune (e.g. Darija) usable by transcribe
   asr-check <dir> --ref FILE [--from S --to S]
@@ -66,21 +81,33 @@ case "$CMD" in
     "$EV2_PY" "$SK/scripts/clean-retakes.py" "$VD"
     ;;
   clean)      need_dir "$@"; exec "$EV2_PY" "$SK/scripts/clean-retakes.py" "$@" ;;
-  build)
+  build|hook)
     need_dir "$@"; VD="$1"; shift
-    FINAL_ENV=""
-    for x in "$@"; do [ "$x" = "--final" ] && FINAL_ENV=1; done
+    FINAL_ENV=""; RENDER=1; INIT=0
+    for x in "$@"; do
+      case "$x" in --final) FINAL_ENV=1;; --no-render) RENDER=0;; --init) INIT=1;; esac
+    done
     cd "$VD"
+    if [ "$INIT" = 1 ]; then exec "$EV2_PY" "$SK/components/ev2_hook.py" . --init; fi
+    if [ "$CMD" = hook ] && ! cmp -s build.py "$SK/template/build.py"; then
+      echo "ev2 hook: build.py is not the automatic hook (style custom?): running it as is" >&2
+    fi
     FINAL="$FINAL_ENV" "$EV2_PY" build.py
-    hf lint .
+    [ "$RENDER" = 1 ] || exit 0
+    "$EV2_PY" "$SK/scripts/hf_lint.py" .
     hf render . -q standard -f 30 -o out/render.mp4
-    [ -s out/render.mp4 ] || { echo "ev2 build: render produced no out/render.mp4" >&2; exit 1; }
-    echo "ev2 build: out/render.mp4 ($(ffprobe -v error -show_entries format=duration -of csv=p=0 out/render.mp4)s)"
+    [ -s out/render.mp4 ] || { echo "ev2 $CMD: render produced no out/render.mp4" >&2; exit 1; }
+    echo "ev2 $CMD: out/render.mp4 ($(ffprobe -v error -show_entries format=duration -of csv=p=0 out/render.mp4)s)"
     ;;
   inserts)    need_dir "$@"; exec "$EV2_PY" "$SK/scripts/render-inserts.py" "$@" ;;
   finish)     need_dir "$@"; exec "$EV2_PY" "$SK/scripts/finish.py" "$@" ;;
   verify)     need_dir "$@"; exec "$EV2_PY" "$SK/scripts/verify.py" "$@" ;;
   style)      need_dir "$@"; exec bash "$SK/scripts/set-style.sh" "$@" ;;
+  check)      need_dir "$@"; exec "$EV2_PY" "$SK/scripts/check.py" "$@" ;;
+  look)       need_dir "$@"; exec "$EV2_PY" "$SK/scripts/look.py" "$@" ;;
+  beauty)     need_dir "$@"; exec "$EV2_PY" "$SK/scripts/beauty.py" "$@" ;;
+  inputs)     need_dir "$@"; exec "$EV2_PY" "$SK/scripts/inputs.py" "$@" ;;
+  rec)        exec python3 "$SK/scripts/rec.py" "$@" ;;
   keys)       need_dir "$@"; exec "$EV2_PY" "$SK/scripts/keys-suggest.py" "$@" ;;
   describe)   need_dir "$@"; exec "$EV2_PY" "$SK/scripts/describe.py" "$@" ;;
   concat)     need_dir "$@"; exec "$EV2_PY" "$SK/scripts/concat-gen.py" "$@" ;;

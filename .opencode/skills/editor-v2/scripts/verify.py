@@ -24,6 +24,9 @@ WARN (publishable, but look):
   - loudness outside -16..-12 LUFS (finish targets -14, YouTube's reference)
   - a sync check found nothing clear enough to measure
   - key pills are listed but the last finish did not draw them (--no-keys / --raw-body)
+Beauty (beauty.py, skipped with EV2_NO_BEAUTY=1): dead air / frozen / cut faces in the hook, frozen
+inserts, over-zoom, internal notes left in the description -> FAIL; pace, monotony, no music,
+untrustworthy captions -> WARN. Also writes out/beauty.md and out/beauty-sheet.jpg.
 Optional checks (only when the extra is used; never FAIL for the description):
   - key pills: drawn and current -> PASS
   - out/youtube-description.md: <!-- WRITE slots left, > 5000 characters, or its chapters block
@@ -450,6 +453,15 @@ def main():
 
     if os.path.isfile('out/youtube-description.md'):
         check_description(vd)
+
+    # how pro it looks and sounds (beauty.py): its FAILs block DONE like any other
+    if os.environ.get('EV2_NO_BEAUTY') != '1':
+        try:
+            import beauty
+            for lvl, what, det in beauty.run(vd):
+                add(lvl, what, det)
+        except Exception as e:
+            add('WARN', 'beauty', f'beauty check could not run: {e}')
 
     # loudness
     r = subprocess.run(['ffmpeg', '-nostdin', '-i', 'out/final.mp4', '-af', 'ebur128=peak=true', '-f', 'null', '-'],

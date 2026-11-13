@@ -47,9 +47,13 @@ def main():
     if not ins_list:
         print('inserts: no inserts in work/timeline.json (add {"name","src_t","dur","mode"} entries)')
         return 0
-    if not os.path.exists('inserts.py'):
+    raw = {e['name']: e for e in TL.load(vd).get('inserts') or []}
+    all_recipes = all(raw.get(i['name'], {}).get('recipe') for i in ins_list)
+    if not os.path.exists('inserts.py') and not all_recipes:
         shutil.copy(os.path.join(SK, 'template', 'inserts.py'), 'inserts.py')
-        print('inserts: created inserts.py from the template: write one @scene per insert, then re-run')
+        print('inserts: some inserts have no "recipe": created inserts.py from the template. Prefer a recipe '
+              '(flow, steps, checklist, compare, stat, statement, screens) in work/timeline.json; '
+              'write an @scene only for something no recipe can show')
         return 1
 
     old = {}
@@ -61,7 +65,12 @@ def main():
     env['FINAL'] = '1' if a.final else ''
     if a.only:
         env['EV2_ONLY'] = a.only
-    r = subprocess.run([os.environ.get('EV2_PY') or sys.executable, 'inserts.py'], env=env)
+    py = os.environ.get('EV2_PY') or sys.executable
+    if os.path.exists('inserts.py'):
+        r = subprocess.run([py, 'inserts.py'], env=env)
+    else:
+        env['PYTHONPATH'] = os.path.join(SK, 'components') + os.pathsep + env.get('PYTHONPATH', '')
+        r = subprocess.run([py, os.path.join(SK, 'components', 'ev2_inserts.py')], env=env)
     if r.returncode:
         print('inserts: build failed')
         return r.returncode
@@ -73,11 +82,12 @@ def main():
         print('inserts: ERROR --only names not in timeline: ' + ', '.join(sorted(unknown)))
         return 1
 
-    lint = subprocess.run(HF + ['lint', '.'], capture_output=True, text=True) if os.path.exists('index.html') else None
-    if lint and lint.returncode:
-        print('inserts: hf lint failed')
-        print('\n'.join((lint.stdout + lint.stderr).strip().splitlines()[-30:]))
-        return 1
+    if os.path.exists('inserts.py') and not all_recipes:
+        lint = subprocess.run([py, os.path.join(HERE, 'hf_lint.py'), '.'], capture_output=True, text=True)
+        if lint.returncode:
+            print('inserts: hf lint failed')
+            print('\n'.join((lint.stdout + lint.stderr).strip().splitlines()[-30:]))
+            return 1
 
     os.makedirs('work/inserts', exist_ok=True)
     done = fresh = 0

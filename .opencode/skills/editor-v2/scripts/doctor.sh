@@ -276,6 +276,16 @@ else
   no ev2 "could not link $EV2_LINK; call: bash $SK/scripts/ev2 <command>"
 fi
 
+# ── input logger (optional: exact zoom-to-click, click ripples, shortcut pills) ──
+if [ "$(systemctl --user is-active ev2-rec.service 2>/dev/null)" = active ]; then
+  ok rec "input logger running (ev2 rec status)"
+else
+  note rec "input logger off: run 'ev2 rec install' before recording for exact clicks"
+fi
+if ! ls /dev/input/event* >/dev/null 2>&1 || [ ! -r "$(ls /dev/input/event* 2>/dev/null | head -1)" ]; then
+  note input "clicks/shortcut keys not readable: sudo usermod -aG input \$USER (then re-login)"
+fi
+
 echo
 if [ $BAD -eq 0 ]; then
   echo "All set"

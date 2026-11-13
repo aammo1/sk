@@ -123,6 +123,12 @@ def plan_sources(vd):
             continue
         if TEMPLATE_ROWS.get(item.lower()) == src:
             continue
+        # only third-party material needs a credit: the creator's own recording, local file paths
+        # and "identify only" brand marks are internal notes, not something a viewer should read
+        low = (src + ' ' + lic).lower()
+        if any(k in low for k in ('creator original', 'own recording', 'identify only', 'assets/', 'work/',
+                                  '.png', '.jpg', 'editor-v2', 'generated in code')):
+            continue
         rows.append(tuple(c.replace('`', '') for c in (item, src, lic)))
     return rows
 
@@ -205,8 +211,6 @@ def build_text(vd, lang, apps, ch_lines, chapters):
     if setup:
         out += ['', h['setup'], setup]
     src = [f'- {i}: {s} ({l})' for i, s, l in plan_sources(vd)]
-    if music_used(vd):
-        src.append(MUSIC_LINE)
     if src:
         out += ['', h['sources'], *src]
     return '\n'.join(out) + '\n'

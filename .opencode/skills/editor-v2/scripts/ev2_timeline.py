@@ -21,7 +21,8 @@ Schema (version 1), all times in seconds of the SOURCE recording, quantized to t
       ],
       "hook_title": "Intro",                    # chapter name for 00:00
       "inserts": [                              # optional explainer inserts (animated scenes)
-        {"name": "order-flow", "src_t": 135.2, "dur": 8.0, "mode": "over", "cam": true}
+        {"name": "order-flow", "src_t": 135.2, "dur": 8.0, "recipe": "flow",
+         "data": {"title": "...", "steps": ["Boutique", "Commande", "Livraison"]}}
       ],
       "body_music": false,                      # optional: quiet music under the whole body (ev2 finish --body-music)
       "keys": [                                 # optional key-press pills drawn on the body
@@ -33,7 +34,8 @@ Schema (version 1), all times in seconds of the SOURCE recording, quantized to t
 Insert keys: name (^[a-z0-9][a-z0-9-]{0,39}$, unique), src_t (SOURCE seconds, >= hook_split),
 dur (FINAL-video seconds, 1.5-30; it covers that much of the cut body, even across cut
 boundaries), mode ("full" opaque scene | "over" transparent over the screencast; default
-"full"), cam (webcam PiP stays on top; default true).
+"full"), cam (webcam PiP stays on top; default: false for "full", true for "over"),
+recipe + data (a designed scene from data, see components/ev2_recipes.py; no inserts.py needed).
 
 Key pill keys (the whole "keys" field is optional; no field or [] = no pills):
     src_t  SOURCE seconds, >= hook_split (inside a cut it snaps forward to the next kept frame)
@@ -124,6 +126,7 @@ def validate(tl):
             raise TimelineError(f'timeline.json: chapter entries need "src_t" and "title": {c}')
     _validate_inserts(tl, hs)
     _validate_keys(tl, hs)
+    _validate_callouts(tl, hs)
 
 
 INSERT_NAME_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,39}$')
@@ -167,6 +170,10 @@ def _validate_inserts(tl, hs):
             raise TimelineError(f'timeline.json: insert "{name}": unknown mode {mode!r} (use "full" or "over")')
         if not isinstance(ins.get('cam', True), bool):
             raise TimelineError(f'timeline.json: insert "{name}": "cam" must be true or false')
+        if 'recipe' in ins and not isinstance(ins['recipe'], str):
+            raise TimelineError(f'timeline.json: insert "{name}": "recipe" must be a string (flow, steps, checklist, compare, stat, statement, screens)')
+        if 'data' in ins and not isinstance(ins['data'], dict):
+            raise TimelineError(f'timeline.json: insert "{name}": "data" must be an object')
 
 
 KEY_POSITIONS = ('bottom', 'top')
@@ -231,6 +238,37 @@ def _validate_keys(tl, hs):
         pos = kp.get('pos', 'bottom')
         if pos not in KEY_POSITIONS:
             raise TimelineError(f'{who}: unknown pos {pos!r} (use "bottom" or "top")')
+
+
+CALLOUT_TEXT_MAX = 40
+
+
+def _validate_callouts(tl, hs):
+    """callouts: [{"src_t", "text", "dur" (1-8, default 3), "x", "y" (optional, cam_raw pixels)}]:
+    an accent label pointing at the thing being clicked. The target comes from the input log
+    (the click nearest src_t) or the screen activity, unless x/y are given."""
+    cs = tl.get('callouts')
+    if cs is None:
+        return
+    if not isinstance(cs, list):
+        raise TimelineError('timeline.json: "callouts" must be a list')
+    for i, c in enumerate(cs, 1):
+        who = f'timeline.json: callout #{i}'
+        if not isinstance(c, dict):
+            raise TimelineError(f'{who} must be an object')
+        if not _num(c.get('src_t')) or c['src_t'] < hs - 1e-6:
+            raise TimelineError(f'{who}: "src_t" (source seconds, after the hook {hs:g}) is required')
+        t = c.get('text')
+        if not isinstance(t, str) or not t.strip():
+            raise TimelineError(f'{who}: "text" is required (what to look at, e.g. "Confirmer ici")')
+        if len(t) > CALLOUT_TEXT_MAX:
+            raise TimelineError(f'{who}: text is {len(t)} chars (max {CALLOUT_TEXT_MAX})')
+        d = c.get('dur', 3.0)
+        if not _num(d) or not 1.0 <= d <= 8.0:
+            raise TimelineError(f'{who}: dur must be 1-8 seconds')
+        for k in ('x', 'y'):
+            if k in c and not _num(c[k]):
+                raise TimelineError(f'{who}: "{k}" must be a number (cam_raw pixels)')
 
 
 def cut_signature(tl):
@@ -300,7 +338,8 @@ def insert_ranges(tl):
         if f0 + n > total:
             raise TimelineError(f'insert "{name}" runs past the end of the body (ends at {(f0 + n) / FPS:.2f} s, '
                                 f'body is {total / FPS:.2f} s): shorten dur or move src_t')
-        out.append({'name': name, 'mode': ins.get('mode', 'full'), 'cam': ins.get('cam', True),
+        mode = ins.get('mode', 'full')
+        out.append({'name': name, 'mode': mode, 'cam': ins.get('cam', mode == 'over'),
                     'f0': f0, 'n': n, 'body_t': f0 / FPS, 'dur': n / FPS, 'src_t': float(ins['src_t'])})
     out.sort(key=lambda r: r['f0'])
     for a, b in zip(out, out[1:]):
