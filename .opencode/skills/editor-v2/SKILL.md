@@ -46,8 +46,10 @@ the creator explicitly asks for something no recipe can show.
 - Captions are Darija in Arabic script; the ASR is imperfect. `out/captions.srt` is not uploaded
   or burned in until a human checked it (the beauty check says when the ASR was unsure).
 
-## Setup (once)
+## Setup (once per machine)
+Install the skill folder as `~/.agents/skills/editor-v2` (or `~/.config/opencode/skills/editor-v2`), then:
 ```bash
+sudo pacman -S --needed nodejs npm ffmpeg curl   # usually already on Omarchy
 ev2 doctor --install-speech     # checks everything, links ~/.local/bin/ev2 -> <skill>/scripts/ev2
 ev2 rec install                 # logs cursor/clicks/shortcuts while Omarchy records (systemd user service)
 sudo usermod -aG input $USER    # the user runs this once (then re-login): lets the logger see clicks and shortcut keys
@@ -77,7 +79,7 @@ Doctor must end with `All set`. A `MISSING` line is a blocker, so fix it before 
 | 8 | Read `out/verify.md` (and `out/beauty.md`) | Fix every FAIL (see the table at the end); report every WARN to the user. |
 | 9 | `ev2 describe <dir>` | Optional. Fill every `<!-- WRITE -->` slot from `work/description-notes.md`, then `--check`. |
 
-`ev2 finish --editor concat|kdenlive|both|none` (default `concat`, or `EV2_EDITOR`).
+`ev2 finish --editor concat|kdenlive|both|none` (default: `concat` when Concat is installed, else `none`; or `EV2_EDITOR`).
 Other flags: `--captions`, `--no-keys`, `--no-zoom`, `--no-cam`, `--raw-body` (plain cuts, the fastest; no inserts),
 `--no-voice-fx`, `--no-bed`, `--song FILE`, `--bed-under LU`, `--no-body-music`, `--body-under LU`, `--lufs -14`, `--no-open`.
 The body render is cached and only redone when its inputs change.

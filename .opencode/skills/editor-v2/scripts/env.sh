@@ -20,10 +20,15 @@ export HF_VERSION="${HF_VERSION:-0.8.181}"
 hf(){ npx -y "hyperframes@${HF_VERSION}" "$@"; }
 
 # finishing editor for `ev2 finish`: concat (default) | kdenlive | both | none
-export EV2_EDITOR="${EV2_EDITOR:-concat}"
+if [ -z "${EV2_EDITOR:-}" ]; then
+  # Concat when it is installed, else no editor project (final.mp4 is still made); set EV2_EDITOR to force one
+  if command -v concat >/dev/null 2>&1 || [ -x "$HOME/.local/share/concat/concat" ]; then EV2_EDITOR=concat; else EV2_EDITOR=none; fi
+fi
+export EV2_EDITOR
 
 # the kit's private cache and Python
 export EV2_HOME="$HOME/.cache/editor-v2"
+_ev2_add "$EV2_HOME/bin"          # the private uv that doctor installs when the system has none
 export EV1_HOME="$EV2_HOME"
 
 if [ -x "$EV2_HOME/venv/bin/python" ]; then

@@ -38,7 +38,7 @@ if command -v node >/dev/null 2>&1; then
     no node "v$NV is too old, need 22+: update with mise or from https://nodejs.org"
   fi
 else
-  no node "Node.js 22+ not found: install via mise or https://nodejs.org"
+  no node "Node.js 22+ not found: sudo pacman -S nodejs npm (or: mise use -g node@lts)"
 fi
 
 # ── ffmpeg / ffprobe, with libvpx-vp9 ───────────────────────────────────────
@@ -122,6 +122,12 @@ VENV="$EV2_HOME/venv"
 if [ ! -x "$VENV/bin/python" ]; then
   echo "  ..      venv           creating $VENV (no sudo, isolated private venv)"
   mkdir -p "$EV2_HOME"
+  if ! command -v uv >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
+    # the system Python may be too new for the speech wheels: get a private uv (no sudo, not on your PATH)
+    echo "  ..      uv             installing a private uv into $EV2_HOME/bin"
+    curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$EV2_HOME/bin" UV_NO_MODIFY_PATH=1 sh >/dev/null 2>&1 || true
+    export PATH="$EV2_HOME/bin:$PATH"
+  fi
   if command -v uv >/dev/null 2>&1; then
     uv venv "$VENV" --python 3.11 >/dev/null 2>&1 || uv venv "$VENV" >/dev/null 2>&1
   fi
@@ -131,7 +137,7 @@ if [ ! -x "$VENV/bin/python" ]; then
 fi
 
 if [ -x "$VENV/bin/python" ] && ! "$VENV/bin/python" -c 'import sys; sys.exit(0 if (3,10) <= sys.version_info[:2] <= (3,13) else 1)' 2>/dev/null; then
-  no python "$("$VENV/bin/python" -V 2>&1) in $VENV is outside 3.10-3.13 (faster-whisper/opencv wheels): rm -rf $VENV && install uv, then re-run doctor"
+  no python "$("$VENV/bin/python" -V 2>&1) in $VENV is outside 3.10-3.13 (faster-whisper/opencv wheels): rm -rf $VENV, then re-run doctor (it installs a private uv with Python 3.11)"
 fi
 if [ -x "$VENV/bin/python" ]; then
   EV2_PY="$VENV/bin/python"
