@@ -16,6 +16,11 @@ import argparse, json, os, re, shutil, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ev2_timeline as TL  # noqa: E402
 
+try:
+    import gpu  # noqa: E402
+except ImportError:
+    gpu = None
+
 # Auto-locate environment Python if launched from bare interpreter lacking faster_whisper / dependencies
 try:
     import faster_whisper
@@ -396,6 +401,17 @@ def transcribe_hf(src, D, lang_arg):
     return words
 
 
+def load_model(name, device, compute):
+    """Load a faster-whisper WhisperModel on the requested device."""
+    fw = globals().get('faster_whisper')
+    if fw is None:
+        import faster_whisper as fw
+    if device == 'cuda':
+        return fw.WhisperModel(name, device='cuda', compute_type=compute)
+    return fw.WhisperModel(name, device='cpu', compute_type='int8',
+                           cpu_threads=os.cpu_count() or 4)
+
+
 def main():
     ap = argparse.ArgumentParser(description="transcribe.py — transcribe audio/video with faster-whisper or HyperFrames fallback.")
     ap.add_argument('video_dir', help="Video project directory containing assets/media/vo.wav")
@@ -408,6 +424,8 @@ def main():
                          "CTranslate2 repo id (e.g. a Darija fine-tune) or a local model dir. Default "
                          "large-v3-turbo or $EV2_WHISPER_MODEL. base/small are fast drafts, weak on Darija.")
     ap.add_argument('--engine', default='fw', choices=['fw', 'hf'], help="Engine: fw (faster-whisper) or hf (hyperframes)")
+    ap.add_argument('--device', default=os.environ.get('EV2_WHISPER_DEVICE', 'auto'), choices=['auto', 'cpu', 'cuda'],
+                    help='Whisper device (auto: the GPU when available)')
     ap.add_argument('--windowed', action='store_true', help="Force 20s overlapping window transcription")
     ap.add_argument('--force', action='store_true',
                     help="Overwrite a hand-corrected work/tx/words.json (a timestamped backup is kept)")
@@ -417,7 +435,29 @@ def main():
 
     # Never silently throw away transcript corrections made at the PLAN gate.
     edited = TL.words_edited(vd)
-    words_file = TL.words_paths(vd)[0]
+    words_file, stamp_file = TL.words_paths(vd)
+    if TL.is_script_words(vd) and not a.force:
+        with open(words_file, 'r', encoding='utf-8') as f:
+            raw = json.load(f)
+        words = raw.get('words', []) if isinstance(raw, dict) else raw
+        if isinstance(raw, dict):
+            with open(words_file, 'w', encoding='utf-8') as f:
+                json.dump(words, f, indent=2, ensure_ascii=False)
+        if not os.path.isfile(stamp_file):
+            with open(stamp_file, 'w', encoding='utf-8') as f:
+                json.dump({'sha': 'script', 'source': 'script'}, f, indent=2)
+        tx_dir = os.path.dirname(words_file)
+        raw_path = os.path.join(tx_dir, 'words_raw.json')
+        if not os.path.isfile(raw_path):
+            with open(raw_path, 'w', encoding='utf-8') as f:
+                json.dump(words, f, indent=2, ensure_ascii=False)
+        with open(os.path.join(tx_dir, 'transcript.txt'), 'w', encoding='utf-8') as f:
+            f.write(' '.join(str(w.get('w', '')) for w in words).strip() + '\n')
+        with open(os.path.join(tx_dir, 'engine.json'), 'w', encoding='utf-8') as f:
+            json.dump({'engine': 'director-script', 'source': 'script', 'mean_prob': 1.0,
+                       'low_prob_share': 0.0, 'script': True, 'words': len(words)}, f, indent=2)
+        print(f'transcribe: {words_file} comes from tutorial-director script ({len(words)} words); skipping ASR (--force to run Whisper)')
+        return
     if edited and not a.force:
         why = ('was edited since the last transcription' if edited is True
                else 'exists and may contain hand corrections (no record of the last automatic write)')
@@ -473,18 +513,40 @@ def main():
         print(f'transcribe: {n_user} personal terms from {USER_TERMS}')
     hot = hotwords_text() if a.language != 'en' else None
 
+    device = None
     if use_fw:
-        engine_name = f'faster-whisper ({a.model}, int8-cpu)'
-        print(f'Loading WhisperModel({a.model}, device="cpu", compute_type="int8")...')
-        model = faster_whisper.WhisperModel(a.model, device="cpu", compute_type="int8",
-                                            cpu_threads=os.cpu_count() or 4)
-        raw_words = transcribe_fw(
-            model, src, D,
-            lang_arg=a.language,
-            initial_prompt=DARIJA_TECH_PROMPT,
-            windowed=a.windowed,
-            hotwords=hot,
-        )
+        if a.device == 'cpu':
+            device, compute = 'cpu', 'int8'
+        elif a.device == 'cuda':
+            device, compute = 'cuda', 'float16'
+        else:
+            device, compute = gpu.whisper_device() if gpu else ('cpu', 'int8')
+
+        def _run_fw(dev, comp):
+            print(f'Loading WhisperModel({a.model}, device="{dev}", compute_type="{comp}")...')
+            model = load_model(a.model, dev, comp)
+            return transcribe_fw(
+                model, src, D,
+                lang_arg=a.language,
+                initial_prompt=DARIJA_TECH_PROMPT,
+                windowed=a.windowed,
+                hotwords=hot,
+            )
+
+        if device == 'cuda':
+            try:
+                raw_words = _run_fw(device, compute)
+            except Exception as e:
+                if a.device == 'cuda':
+                    sys.exit(f'transcribe: CUDA failed ({e})')
+                print(f'transcribe: CUDA failed ({e}); using the CPU. Fix: ev2 doctor --install-gpu',
+                      file=sys.stderr)
+                PROBS.clear()
+                device, compute = 'cpu', 'int8'
+                raw_words = _run_fw(device, compute)
+        else:
+            raw_words = _run_fw(device, compute)
+        engine_name = f'faster-whisper ({a.model}, {compute}-{device})'
     else:
         engine_name = 'hyperframes'
         raw_words = transcribe_hf(src, D, a.language)
@@ -508,6 +570,7 @@ def main():
     TL.stamp_words(vd)
     with open(os.path.join(out_dir, 'engine.json'), 'w') as f:
         json.dump({'engine': engine_name, 'model': a.model if use_fw else None, 'language': a.language,
+                   'device': device if use_fw else None,
                    'hotwords': hot if use_fw else None, 'windowed': bool(a.windowed),
                    'source': os.path.relpath(src, vd), 'words': len(words),
                    'mean_prob': round(sum(PROBS) / len(PROBS), 3) if PROBS else None,

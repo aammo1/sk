@@ -33,7 +33,7 @@ def _words():
 
 
 def words(ins):
-    segs = TL.body_segments(_tl())
+    segs = [seg for seg in TL.body_segments(_tl()) if not seg.get('card')]
     out = []
     for w in _words():
         s = w['s']

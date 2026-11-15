@@ -39,4 +39,14 @@ fi
 export EV2_PY
 export EV1_PY="$EV2_PY"
 
+# CUDA libraries from pip (nvidia-cublas-cu12 / nvidia-cudnn-cu12) for faster-whisper on the GPU
+for _d in "$EV2_HOME"/venv/lib/python3*/site-packages/nvidia/cublas/lib \
+          "$EV2_HOME"/venv/lib/python3*/site-packages/nvidia/cudnn/lib; do
+  if [ -d "$_d" ]; then
+    case ":${LD_LIBRARY_PATH:-}:" in *":$_d:"*) ;; *) LD_LIBRARY_PATH="$_d${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}";; esac
+  fi
+done
+unset _d
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+
 true

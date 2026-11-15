@@ -46,8 +46,9 @@ Good promises: a result, a time, a contrast. "Ship your first app in 10 min". "�
 
 ## 2. Explainer inserts: `"inserts"` in `work/timeline.json`
 
-A full-screen animated scene that replaces the screen for 4-12 s while the voice keeps going.
-Use one every 2-3 minutes, where the speaker explains a concept (a flow, steps, a comparison).
+A full-screen animated scene that replaces the screen for 8-14 s (12 s recommended) while the voice keeps going.
+The finished card holds `insert_hold` s (default 4) before the exit transition, so more items need a longer `dur` (`ev2 check` tells you).
+Use about one every `insert_every` s (default 60; ask the creator: 1 min or 2 min?) and one near each chapter start, where the speaker explains a concept (a flow, steps, a comparison).
 `src_t` = SOURCE seconds where it starts. `ev2 inserts <dir>`, then `ev2 inserts <dir> --final`.
 
 Items are strings, or objects `{"label", "sub", "icon", "at"}`:
@@ -58,14 +59,14 @@ Items are strings, or objects `{"label", "sub", "icon", "at"}`:
 
 ### flow — steps joined by arrows, a glowing dot travels the path (2-6 steps)
 ```json
-{"name": "order-flow", "src_t": 126.0, "dur": 8, "recipe": "flow",
+{"name": "order-flow", "src_t": 126.0, "dur": 12, "recipe": "flow",
  "data": {"title": "كيفاش كتدوز *الطلبية*", "kicker": "Order flow",
           "steps": ["Boutique", "Commande", {"label": "WhatsApp", "sub": "Confirmation"}, "Ozon Express"]}}
 ```
 
 ### steps — numbered list + a big icon that follows the current step (2-6 steps)
 ```json
-{"name": "ship-steps", "src_t": 330.0, "dur": 8, "recipe": "steps",
+{"name": "ship-steps", "src_t": 330.0, "dur": 12, "recipe": "steps",
  "data": {"title": "من التأكيد حتى *التسليم*",
           "steps": [{"label": "Confirmer la commande", "sub": "WhatsApp + appel"},
                     {"label": "Créer le BL", "sub": "PDF signé"},
@@ -74,13 +75,13 @@ Items are strings, or objects `{"label", "sub", "icon", "at"}`:
 
 ### checklist — rows tick one by one (2-8 items)
 ```json
-{"name": "before-confirm", "src_t": 60.0, "dur": 7, "recipe": "checklist",
+{"name": "before-confirm", "src_t": 60.0, "dur": 12, "recipe": "checklist",
  "data": {"title": "قبل ما تأكد الطلب", "items": ["Nom complet", "Téléphone", "Adresse", "Stock disponible"]}}
 ```
 
 ### compare — two columns, bad vs good, VS badge (1-5 items per side)
 ```json
-{"name": "before-after", "src_t": 180.0, "dur": 7, "recipe": "compare",
+{"name": "before-after", "src_t": 180.0, "dur": 12, "recipe": "compare",
  "data": {"title": "Avant / *Zehri*",
           "left": {"title": "Avant", "items": ["Excel + WhatsApp", "Commandes perdues"]},
           "right": {"title": "Avec Zehri", "items": ["Tout dans un tableau", "Rappels automatiques"]}}}
@@ -88,20 +89,20 @@ Items are strings, or objects `{"label", "sub", "icon", "at"}`:
 
 ### stat — one big number counting up (+ up to 3 small numbers)
 ```json
-{"name": "pending", "src_t": 230.0, "dur": 6, "recipe": "stat",
+{"name": "pending", "src_t": 230.0, "dur": 8, "recipe": "stat",
  "data": {"value": "10", "label": "commandes en attente aujourd'hui",
           "items": [{"value": "0", "label": "Rappels dus"}, {"value": "3", "label": "Échecs"}]}}
 ```
 
 ### statement — one big sentence (a rule, a key idea), optional icon (<= 90 chars)
 ```json
-{"name": "golden-rule", "src_t": 270.0, "dur": 5, "recipe": "statement",
+{"name": "golden-rule", "src_t": 270.0, "dur": 8, "recipe": "statement",
  "data": {"text": "Chaque commande passe par *WhatsApp* avant l'expédition", "icon": "brand:whatsapp", "kicker": "Règle d'or"}}
 ```
 
 ### screens — 1-3 screenshots from the recording, fanned in 3D, with labels
 ```json
-{"name": "key-screens", "src_t": 370.0, "dur": 6, "recipe": "screens",
+{"name": "key-screens", "src_t": 370.0, "dur": 12, "recipe": "screens",
  "data": {"title": "Les 3 écrans clés",
           "shots": [{"src_t": 150, "label": "Commandes"}, {"src_t": 290, "label": "Ozon Express"}, {"src_t": 395, "label": "Stock"}]}}
 ```

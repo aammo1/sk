@@ -5,17 +5,20 @@
 #   bash ~/.agents/skills/editor-v2/scripts/doctor.sh
 #   bash ~/.agents/skills/editor-v2/scripts/doctor.sh --install-speech
 #   bash ~/.agents/skills/editor-v2/scripts/doctor.sh --install-matte
-#   bash ~/.agents/skills/editor-v2/scripts/doctor.sh --install-speech --install-matte
+#   bash ~/.agents/skills/editor-v2/scripts/doctor.sh --install-gpu
+#   bash ~/.agents/skills/editor-v2/scripts/doctor.sh --install-speech --install-matte --install-gpu
 
 SK="$(cd "$(dirname "$0")/.." && pwd)"
 source "$SK/scripts/env.sh"
 
 SPEECH=0
 MATTE=0
+GPU=0
 for a in "$@"; do
   case "$a" in
     --install-speech) SPEECH=1 ;;
     --install-matte)  MATTE=1 ;;
+    --install-gpu)    GPU=1 ;;
   esac
 done
 
@@ -186,6 +189,27 @@ if [ -x "$VENV/bin/python" ]; then
     fi
   else
     no speech "faster-whisper not installed (transcription will not work): re-run with --install-speech"
+  fi
+
+  # GPU (NVIDIA): NVENC encodes + faster-whisper on CUDA
+  HAS_NV=0; command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1 && HAS_NV=1
+  if [ $HAS_NV -eq 1 ] && { [ $GPU -eq 1 ] || [ $SPEECH -eq 1 ]; } \
+     && ! "$EV2_PY" -c 'import nvidia.cublas, nvidia.cudnn' 2>/dev/null; then
+    echo "  ..      gpu            installing CUDA libraries (cuBLAS, cuDNN 9) into venv (~1 GB)"
+    if command -v uv >/dev/null 2>&1; then
+      VIRTUAL_ENV="$VENV" uv pip install nvidia-cublas-cu12 'nvidia-cudnn-cu12==9.*' >/dev/null 2>&1
+    else
+      "$VENV/bin/pip" install -q nvidia-cublas-cu12 'nvidia-cudnn-cu12==9.*' >/dev/null 2>&1
+    fi
+  fi
+  GL="$("$EV2_PY" "$SK/scripts/gpu.py" status --refresh 2>/dev/null)"
+  case "$GL" in "gpu on"*) ok gpu "${GL#gpu }";; *) note gpu "${GL#gpu } (CPU is used; EV2_GPU=0 forces CPU)";; esac
+  if [ $HAS_NV -eq 1 ] && "$EV2_PY" -c 'import faster_whisper' 2>/dev/null; then
+    if "$EV2_PY" -c 'import nvidia.cublas, nvidia.cudnn' 2>/dev/null; then
+      ok whisper-gpu "CUDA libraries present (transcribe runs on the GPU)"
+    else
+      note whisper-gpu "CUDA libraries missing: ev2 doctor --install-gpu (transcribe uses the CPU until then)"
+    fi
   fi
 
   # Matte / Cut-out: torch + torchvision or rembg

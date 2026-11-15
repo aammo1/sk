@@ -2,7 +2,7 @@
 """finish.py — assemble every deliverable from work/timeline.json, then verify it.
 
     finish.py <video-dir> [--editor concat|kdenlive|both|none] [--captions] [--no-zoom] [--no-cam]
-                          [--raw-body] [--no-keys] [--no-voice-fx] [--no-bed] [--song FILE] [--bed-under LU] [--body-music] [--body-under LU] [--no-short] [--no-open]
+                          [--raw-body] [--no-keys] [--no-voice-fx] [--no-bed] [--song FILE] [--bed-under LU] [--body-music] [--body-under LU] [--no-short] [--no-open] [--jobs N|auto]
 
 Steps (any failure stops with a non-zero exit; nothing is silently skipped):
   1. Load work/timeline.json (hook_split + body segments + chapters).
@@ -16,7 +16,8 @@ Steps (any failure stops with a non-zero exit; nothing is silently skipped):
      -> work/body_voice.wav; the picture from body_render.py (auto zooms, styled webcam,
      chapter cards, key pills from "keys" in timeline.json, --captions burned in)
      -> work/body_video.mp4 (--raw-body: plain cuts, no key pills, refused when the timeline has
-     inserts; --no-keys: skip the key pills for this run). Insert SFX cues
+     inserts; --no-keys: skip the key pills for this run). `--jobs N|auto` renders the body in
+     parallel 20 s chunks (cached per chunk). Insert SFX cues
      (work/inserts/<name>.cues.txt) are shifted to the insert's body time, a soft key click is
      added when each key pill appears, and both are mixed into the body audio -> work/body_mix.wav.
   6. Hook + body audio, two-pass loudness-normalized to -14 LUFS / -1.5 dBTP (YouTube)
@@ -45,6 +46,7 @@ except ImportError:
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import ev2_timeline as TL  # noqa: E402
+import gpu  # noqa: E402
 
 FPS, SPF = TL.FPS, TL.SAMPLES_PER_FRAME
 
@@ -92,18 +94,35 @@ def write_body_voice(vo_path, segs, out_path, hook_split):
     vo = vo[:, :2]
     fade = int(0.010 * TL.SR)
     ramp = np.linspace(0, 1, fade, dtype=np.float32)[:, None]
+    card_fade = int(0.015 * TL.SR)
+    card_ramp = np.linspace(0, 1, card_fade, dtype=np.float32)[:, None]
     parts = []
     prev_end_f = TL.frames(hook_split)
+    prev_card = False
     for s in segs:
+        if s.get('card'):
+            if parts and not prev_card:
+                cf = min(card_fade, len(parts[-1]))
+                parts[-1][-cf:] *= card_ramp[::-1][-cf:]
+            parts.append(np.zeros((s['n'] * SPF, 2), dtype=np.float32))
+            prev_card = True
+            prev_end_f = s['f_end']
+            continue
         a, b = s['f_start'] * SPF, s['f_end'] * SPF
         x = vo[a:b]
         if len(x) < b - a:
             x = np.pad(x, ((0, b - a - len(x)), (0, 0)))
         x = x.copy()
-        if s['f_start'] != prev_end_f:   # a real cut happened before this segment
-            x[:fade] *= ramp
+        if prev_card:
+            cf = min(card_fade, len(x))
+            x[:cf] *= card_ramp[:cf]
+        elif s['f_start'] != prev_end_f:   # a real cut happened before this segment
+            cf = min(fade, len(x))
+            x[:cf] *= ramp[:cf]
             if parts:
-                parts[-1][-fade:] *= ramp[::-1]
+                pf = min(fade, len(parts[-1]))
+                parts[-1][-pf:] *= ramp[::-1][-pf:]
+        prev_card = False
         prev_end_f = s['f_end']
         parts.append(x)
     body = np.concatenate(parts) if parts else np.zeros((0, 2), np.float32)
@@ -165,7 +184,7 @@ def insert_cue_lines(ins_list, cue_dir='work/inserts'):
 
 
 def select_expr(segs):
-    return '+'.join(f"between(n,{s['f_start']},{s['f_end'] - 1})" for s in segs)
+    return '+'.join(f"between(n,{s['f_start']},{s['f_end'] - 1})" for s in segs if not s.get('card'))
 
 
 def main():
@@ -179,7 +198,8 @@ def main():
     ap.add_argument('--body-music', dest='body_music', action='store_true', default=None,
                     help='Quiet music under the whole tutorial (default: on, unless "body_music": false in timeline.json)')
     ap.add_argument('--no-body-music', dest='body_music', action='store_false', help='Force the body music off')
-    ap.add_argument('--body-under', type=float, default=20.0, help='Body music level under the voice in LU (default 20)')
+    ap.add_argument('--body-under', type=float, default=None,
+                    help='Body music level under the voice in LU (default 20, or 17 for director TTS)')
     ap.add_argument('--captions', action='store_true', help='Burn captions into the body (check the transcript first)')
     ap.add_argument('--no-zoom', action='store_true', help='No automatic zooms on the body')
     ap.add_argument('--no-cam', action='store_true', help='Leave the webcam as recorded (no styled PiP)')
@@ -192,7 +212,15 @@ def main():
     ap.add_argument('--allow-stale-render', action='store_true', help='Skip the index.html-newer-than-render check')
     ap.add_argument('--preset', default=os.environ.get('EV2_PRESET', 'fast'), help='x264 preset (default fast)')
     ap.add_argument('--crf', default=os.environ.get('EV2_CRF', '18'))
+    ap.add_argument('--jobs', default=os.environ.get('EV2_JOBS', '1'),
+                    help='Body render workers: N or auto (default 1; EV2_JOBS)')
     a = ap.parse_args()
+    if a.jobs != 'auto':
+        try:
+            if int(a.jobs) < 1:
+                raise ValueError
+        except ValueError:
+            raise FinishError('--jobs must be a number or auto')
 
     vd = os.path.abspath(a.video_dir)
     os.chdir(vd)
@@ -200,7 +228,19 @@ def main():
     t0 = time.time()
 
     step('loading work/timeline.json')
+    print(f'  {gpu.label()}')
     tl = TL.load(vd)
+    is_director = bool(tl.get('director') or os.path.isfile('work/director.json'))
+    if not is_director and os.path.isfile('kit.json'):
+        try:
+            is_director = bool(json.load(open('kit.json', encoding='utf-8')).get('director'))
+        except (ValueError, OSError):
+            pass
+    if a.body_under is None:
+        a.body_under = 17.0 if is_director else 20.0
+    if a.raw_body:
+        tl = dict(tl, _chapter_cards={'style': 'bar',
+                                      'hold': (tl.get('_chapter_cards') or {}).get('hold', TL.CHAPTER_HOLD_DEFAULT)})
     segs = TL.body_segments(tl)
     ins_list = TL.insert_ranges(tl)
     if ins_list and a.raw_body:
@@ -222,14 +262,14 @@ def main():
     has_hook = hs > 0
     if not segs:
         raise FinishError('timeline.json has no body segments: re-run `ev2 clean <video-dir>`')
-    body_dur = sum(s['f_end'] - s['f_start'] for s in segs) / FPS
+    body_dur = TL.body_duration(tl)
     for p in ['assets/media/vo.wav', 'assets/media/cam_raw.mp4']:
         if not os.path.isfile(p):
             raise FinishError(f'{p} missing: re-run `ev2 init`')
     cam = probe('assets/media/cam_raw.mp4')
     if abs(cam.get('fps', 0) - FPS) > 0.01 or (cam.get('width'), cam.get('height')) != (1920, 1080):
         raise FinishError(f'cam_raw.mp4 must be 1920x1080 @ {FPS} fps (got {cam.get("width")}x{cam.get("height")} @ {cam.get("fps")})')
-    last_f = segs[-1]['f_end']
+    last_f = max((s['f_end'] for s in segs if not s.get('card')), default=0)
     if last_f > int(cam['v_dur'] * FPS + 0.5):
         raise FinishError(f'timeline ends at frame {last_f} but cam_raw.mp4 has ~{int(cam["v_dur"] * FPS)} frames')
     print(f'  hook 0-{hs:.3f}s | body {len(segs)} segments, {body_dur:.2f}s | expected final {hs + body_dur:.2f}s')
@@ -295,7 +335,7 @@ def main():
              + (', captions' if a.captions else ''))
         import body_render
         plan = body_render.render(vd, zoom=not a.no_zoom, cam=not a.no_cam, captions=a.captions, preset=a.preset,
-                                  keys=not a.no_keys)
+                                  keys=not a.no_keys, jobs=a.jobs)
         body_v = 'work/body_video.mp4'
         bi = probe(body_v)
         if abs(bi.get('v_dur', 0) - body_dur) > 1.5 / FPS:
@@ -310,9 +350,12 @@ def main():
     use_music = (tl.get('body_music', True) if a.body_music is None else a.body_music) and not a.no_bed
     body_base = 'work/body_voice.wav'
     if use_music:
+        card_ramps = []
+        for c in TL.card_segments(tl):
+            card_ramps += ['--ramp', f'{c["out_start"]:.3f},{c["out_end"]:.3f},6,0.3']
         run([sys.executable, os.path.join(HERE, 'bed-mix.py'), '--voice', 'work/body_voice.wav', '--song', a.song,
              '--under', str(a.body_under), '--dur', f'{n / TL.SR:.6f}', '--fade-in', '1.5', '--ring-out', '3',
-             '--out', 'work/body_music.wav'], 'bed-mix.py (body music)')
+             *card_ramps, '--out', 'work/body_music.wav'], 'bed-mix.py (body music)')
         body_base = 'work/body_music.wav'
         print(f'  quiet music under the whole body ({a.body_under:g} LU under the voice) -> {body_base}')
     for p in (['work/body_music_bed.wav'] if use_music else ['work/body_music.wav', 'work/body_music_bed.wav']):
@@ -382,7 +425,8 @@ def main():
     fg_path = 'work/final.filtergraph'
     open(fg_path, 'w').write(';\n'.join(chains))
     cmd = ['ffmpeg', '-nostdin', '-v', 'error', '-stats', '-y', *inputs, '-/filter_complex', fg_path,
-           '-map', '[v]', '-map', f'{ai}:a:0', '-c:v', 'libx264', '-preset', a.preset, '-crf', str(a.crf),
+           '-map', '[v]', '-map', f'{ai}:a:0',
+           *gpu.venc(['-c:v', 'libx264', '-preset', a.preset, '-crf', str(a.crf)], int(a.crf)),
            '-pix_fmt', 'yuv420p', '-r', str(FPS), '-c:a', 'aac', '-b:a', '192k', '-ar', '48000',
            '-movflags', '+faststart', 'out/final.mp4']
     r = subprocess.run(cmd)
@@ -430,10 +474,13 @@ def main():
         print('  ' + r.stdout.strip().splitlines()[-1])
 
     json.dump({'cut_signature': TL.cut_signature(tl), 'chapter_signature': TL.chapter_signature(vd, tl),
+               'chapter_cards': tl.get('_chapter_cards'), 'raw_body': bool(a.raw_body),
                'insert_signature': TL.insert_signature(vd, tl), 'inserts': [i['name'] for i in ins_list],
                'keys_signature': keys_sig, 'key_pills': len(pills), 'keys_drawn': draw_keys,
-               'body_music': bool(use_music), 'hook_duration': NH / FPS, 'body_duration': body_dur,
+               'body_music': bool(use_music), 'body_under': a.body_under, 'director': is_director,
+               'hook_duration': NH / FPS, 'body_duration': body_dur,
                'expected_final': total, 'editors': editors, 'short': not a.no_short,
+               'jobs': str(a.jobs), 'gpu': gpu.enabled(),
                'finished': time.strftime('%Y-%m-%dT%H:%M:%S'), 'seconds': round(time.time() - t0, 1)},
               open('work/finish.json', 'w'), indent=2)
 

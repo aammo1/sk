@@ -231,6 +231,9 @@ def main():
 
     probe = lambda p: float(subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', p],
                                            capture_output=True, text=True).stdout.strip())
+    poly_cmd = [PY, os.path.join(HERE, 'finish.py'), vd, '--editor', 'none', '--no-open', '--preset', 'ultrafast', '--no-short']
+    r = subprocess.run(poly_cmd, capture_output=True, text=True)
+    check(r.returncode == 0, 'finish full-body without key pills exits 0')
     dur_before = probe(fin)
     tl = TL.load(vd)
     tl['keys'] = [{'src_t': 17 * PERIOD + 0.3, 'keys': 'Super + Space', 'label': 'test'}]
@@ -240,7 +243,6 @@ def main():
     check(json.load(open(os.path.join(vd, 'work/finish.json'))).get('keys_drawn') is False, '--no-keys: keys_drawn false')
     check('WARN  key pills' in r.stdout, 'verify WARNs when pills are listed but not drawn')
 
-    poly_cmd = [PY, os.path.join(HERE, 'finish.py'), vd, '--editor', 'none', '--no-open', '--preset', 'ultrafast', '--no-short']
     r = subprocess.run(poly_cmd, capture_output=True, text=True)
     print(r.stdout[-1200:], r.stderr[-1200:])
     check(r.returncode == 0, 'finish with one key pill exits 0')

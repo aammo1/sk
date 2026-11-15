@@ -1,6 +1,6 @@
 ---
 name: editor-v2
-description: "Edits Omarchy screencast recordings (Moroccan Darija + English tech terms, corner webcam) into a pro-looking YouTube tutorial: a designed hook (promise, montage of the app's own screens, end card) built from a short JSON, a polished body (screen inset on a branded backdrop, zoom-to-click, click ripples, callouts, speaker PiP, chapter cards, quiet music and sound effects), animated explainer inserts from data recipes (flow, steps, checklist, compare, stat, statement, screens), one synced final.mp4, a Concat (or Kdenlive) project, a 9:16 Short and YouTube chapters, all checked by a definition-of-done verifier and a beauty check. Optional: calm style, key-press pills, YouTube description, an input logger for exact clicks. Use when the user wants to edit, cut, caption or finish a recording/screencast/tutorial video, or mentions ev2, editor-v2, the hook, explainer insert, motion graphics, animated explanation, callout, zoom, click effects, Concat or Kdenlive projects for a video, key pills, shortcut overlay, calm style, title card, youtube description."
+description: "Edits Omarchy screencast recordings (Moroccan Darija + English tech terms, corner webcam) into a pro-looking YouTube tutorial: a designed hook (promise, montage of the app's own screens, end card) built from a short JSON, a polished body (screen inset on a branded backdrop, zoom-to-click, click ripples, callouts, speaker PiP, chapter cards, quiet music and sound effects), animated explainer inserts from data recipes (flow, steps, checklist, compare, stat, statement, screens), one synced final.mp4, a Concat (or Kdenlive) project, a 9:16 Short and YouTube chapters, all checked by a definition-of-done verifier and a beauty check. Optional: calm style, key-press pills, YouTube description, an input logger for exact clicks. Use when the user wants to edit, cut, caption or finish a recording/screencast/tutorial video, or mentions ev2, editor-v2, the hook, explainer insert, motion graphics, animated explanation, callout, zoom, click effects, Concat or Kdenlive projects for a video, key pills, shortcut overlay, calm style, title card, youtube description, separate camera, draft, GPU."
 ---
 
 # Editor V2 — Darija screencast → pro YouTube tutorial
@@ -33,7 +33,9 @@ the creator explicitly asks for something no recipe can show.
 - **Clicks:** an accent ripple at every logged click, and a soft click sound.
 - **Speaker:** the burned-in webcam is painted out and redrawn as a rounded PiP at a fixed corner
   (the same spot the hook uses; it follows if the creator moved the overlay). Fades out during full inserts.
-- **Callouts, chapter cards (accent colour + whoosh), key pills** (timeline `keys` + shortcuts from the input log).
+  With a separate camera (`work/camera.json`, see below) nothing is painted out: the PiP comes from the camera file.
+- **Chapter cards:** full-page pause cards (`chapter_hold`, default 2.8 s; video + voice stop, music + whoosh stay, PiP hides; `--chapter-style bar` for the lower-third).
+- **Callouts and key pills** (timeline `keys` + shortcuts from the input log).
 - **Inserts:** zoom-through transition in and out, with whooshes.
 - **Sound:** voice cleanup, quiet music under the whole body (on by default, 20 LU under the voice),
   sound effects, two-pass −14 LUFS.
@@ -45,6 +47,7 @@ the creator explicitly asks for something no recipe can show.
 - It never decides chapters, insert moments or callouts by itself: those are agreed at the PLAN gate.
 - Captions are Darija in Arabic script; the ASR is imperfect. `out/captions.srt` is not uploaded
   or burned in until a human checked it (the beauty check says when the ASR was unsure).
+- A separate camera must be synced: by audio automatically; if the camera has no usable audio, give `--cam-offset`.
 
 ## Setup (once per machine)
 Install the skill folder as `~/.agents/skills/editor-v2` (or `~/.config/opencode/skills/editor-v2`), then:
@@ -53,35 +56,40 @@ sudo pacman -S --needed nodejs npm ffmpeg curl   # usually already on Omarchy
 ev2 doctor --install-speech     # checks everything, links ~/.local/bin/ev2 -> <skill>/scripts/ev2
 ev2 rec install                 # logs cursor/clicks/shortcuts while Omarchy records (systemd user service)
 sudo usermod -aG input $USER    # the user runs this once (then re-login): lets the logger see clicks and shortcut keys
+ev2 doctor --install-gpu        # NVIDIA only: CUDA libs for GPU transcription (encodes use NVENC automatically)
+ev2 rec cam on                  # optional: also record the webcam + mic with every screen recording
 ```
+`EV2_GPU=0` forces the CPU for everything.
 If `ev2` is not on PATH, run `bash ~/.agents/skills/editor-v2/scripts/ev2 <command>` (same commands).
 `ev2 rec test` shows what the logger sees. It never stores typed characters, only key timing and
 Ctrl/Alt/Super shortcuts, and only while a recording runs.
 
 **Darija transcription model (recommended, once):** generic Whisper turns much of Darija into broken
-standard Arabic. `ev2 convert-model amineouaki/whisper-medium-darija-combined` (~30 min, once), then
+standard Arabic. `ev2 convert-model amineouaki/whisper-medium-darija-combined float16` (or `int8` for CPU), then
 `export EV2_WHISPER_MODEL=~/.cache/editor-v2/models/whisper-medium-darija-combined-ct2`. Compare with
 `ev2 asr-check` before trusting it; transcribe with `--windowed`. Term fixes:
 `~/.config/editor-v2/darija-terms.json` (`{"فيرسل": "Vercel"}`), `EV2_HOTWORDS="Vercel, Supabase"`.
+On this machine: CUDA libs (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12`) and FP16 `whisper-medium-darija-combined-ct2` (`EV2_WHISPER_MODEL` in `~/.bashrc`) are installed, and Darija TTS models are downloaded at `~/Models/golha-darija-tts` (Darija+French code-switching) and `~/Models/lahgtna-omnivoice-v2`. If using those TTS models, install their dependencies (`golha-darija-tts` pins Python 3.12, `transformers==4.46.3`, CUDA `torch==2.6.0`) in a **separate** virtualenv — never into `~/.cache/editor-v2/venv`.
 Doctor must end with `All set`. A `MISSING` line is a blocker, so fix it before editing.
 
 ## The workflow (agent: follow in order, stop where marked)
 
 | # | Command | Agent does |
 |---|---|---|
-| 1 | `ev2 init <file\|--latest> [name] [--style calm]` | Confirm which recording. Creates `~/editor-v2/videos/<name>/`, reads the input log into `work/inputs.json` if there is one. |
+| 1 | `ev2 init <file\|--latest> [name] [--style calm]` | Confirm which recording. Creates `~/editor-v2/videos/<name>/`, reads the input log into `work/inputs.json` if there is one. Separate camera: `--cam FILE` (or automatic from `ev2 rec cam`). |
 | 2 | `ev2 transcribe <dir>` | Words, `work/timeline.json`, `work/cuts-report.md`. Language `ar`; never `auto` for Darija. Refuses to overwrite a hand-corrected `words.json` (`--force` keeps a backup). |
+| 2b | `ev2 draft <dir> [--retakes]` | Optional, before the PLAN gate: a 720p rough cut with source times and retake markers (~1 min). Show it to the creator to agree cuts, chapters and insert moments. Never a deliverable. |
 | 3 | `ev2 hook <dir> --init` | Writes `work/hook.json` with auto-picked shots. Read the list it prints. |
 | 4 | **PLAN gate** (below) | Fill `PLAN.md`; write chapters, inserts (recipes), callouts into `work/timeline.json` and the promise into `work/hook.json`. Run `ev2 check <dir>` until `ready`. **STOP and get explicit approval.** |
 | 5 | `ev2 hook <dir>` then `ev2 hook <dir> --final` | Renders `out/render.mp4` (~2 min). The final build refuses while `hook.json` has problems. |
 | 6 | `ev2 inserts <dir> --final` | Only if the plan has inserts (~35 s each). |
-| 7 | `ev2 finish <dir>` | Everything else, then verify + beauty check (~15-25 min for a 6 min video). Preview a few seconds first if you changed the look: `ev2 body <dir> --preview 40,55`. |
+| 7 | `ev2 finish <dir>` | Everything else, then verify + beauty check (~15-25 min for a 6 min video). Preview a few seconds first if you changed the look: `ev2 body <dir> --preview 40,55`. `--jobs auto` renders the body in parallel chunks (faster; later small changes re-render only their chunk). |
 | 8 | Read `out/verify.md` (and `out/beauty.md`) | Fix every FAIL (see the table at the end); report every WARN to the user. |
 | 9 | `ev2 describe <dir>` | Optional. Fill every `<!-- WRITE -->` slot from `work/description-notes.md`, then `--check`. |
 
 `ev2 finish --editor concat|kdenlive|both|none` (default: `concat` when Concat is installed, else `none`; or `EV2_EDITOR`).
 Other flags: `--captions`, `--no-keys`, `--no-zoom`, `--no-cam`, `--raw-body` (plain cuts, the fastest; no inserts),
-`--no-voice-fx`, `--no-bed`, `--song FILE`, `--bed-under LU`, `--no-body-music`, `--body-under LU`, `--lufs -14`, `--no-open`.
+`--no-voice-fx`, `--no-bed`, `--song FILE`, `--bed-under LU`, `--no-body-music`, `--body-under LU`, `--lufs -14`, `--no-open`, `--jobs N|auto`.
 The body render is cached and only redone when its inputs change.
 
 ### PLAN gate: what to prepare and what approval means
@@ -94,8 +102,8 @@ in PLAN.md's **Approval** section:
    greeting, not the title). Propose 2-3 and let the creator pick. Keep the auto-picked shots unless asked.
 5. Body chapters: at least 3, the first at the start of the body, each >= 10 s, titles <= 40 chars,
    one separator style (e.g. `Commandes — اللائحة`). Never invent chapters the speaker did not cover.
-6. **Inserts**: one every 2-3 minutes where the speaker explains a concept, as recipes
-   (`reference/recipes.md`): moment (source time), recipe, the exact labels. 4-12 s each.
+6. **Inserts**: about one every `insert_every` s (default 60; ask the creator: 1 min or 2 min?) and one near
+   the start of each chapter, as recipes (`reference/recipes.md`): moment (source time), recipe, the exact labels. 10-14 s each (12 s best).
 7. **Callouts**: 2-5 on the buttons that matter (source time + <= 40 chars).
 8. Every third-party asset licensed (`reference/sourcing.md` › Rights).
 9. Optional extras below: each ticked or declined.
@@ -109,7 +117,16 @@ changes cuts later: `ev2 clean`, then `ev2 finish`; rebuild the hook too if `hoo
 - **Key pills**: `ev2 keys <dir>` suggests them from the transcript (`work/keys-suggest.md`); copy the agreed ones
   into `"keys"`. With an input log, real shortcuts become pills automatically (`look.auto_keys`).
 - **YouTube description**: `ev2 describe <dir> [--lang darija|en|fr]` after finish. Fill the slots from the notes only.
-- **Look changes**: `ev2 look <dir> --accent "#E11D74"` (brand colour), `--frame full`, `--max-zoom 1.4`, `--trim off`.
+- **Look changes**: `ev2 look <dir> --accent "#E11D74"` (brand colour), `--frame full`, `--max-zoom 1.4`, `--trim off`,
+  `--pip-corner bottom-left`, `--chapter-style full|bar`, `--chapter-hold S`, `--insert-every S`, `--insert-hold S`.
+
+### Separate camera (optional)
+- **Import:** `ev2 init <screen> [name] --cam FILE [--cam-offset S] [--voice screen|cam]` syncs by audio (with drift check) → `assets/media/cam_face.mp4` + `work/camera.json` (`mode: separate`).
+- **Auto-record with screen:** `ev2 rec cam on|off|status|test [S]` records webcam + mic to `~/.local/share/editor-v2/cams/<recording>.mkv` while Omarchy records; `ev2 init` picks it up automatically (`--no-cam` skips).
+- **Overlay off:** record **without** Omarchy's webcam overlay (it holds `/dev/video0`). After updating, run `systemctl --user restart ev2-rec.service`.
+- **Sync / voice:** if audio sync fails, re-run with `--cam-offset S` (`cam_t = screen_t + S`; measure with `scripts/camsync.py measure`). `--voice cam` uses camera audio as `vo.wav` (keeps `vo_screen.wav`).
+- **PiP & corner:** nothing is painted out; body and hook PiP come from `cam_face.mp4`, cropped around the face (8:9), default corner `bottom-right` (change via `ev2 look <dir> --pip-corner auto|top-left|top-right|bottom-left|bottom-right`).
+- **Low-level tool:** `scripts/camsync.py measure|import|find`.
 
 ### The single source of truth: `work/timeline.json`
 `clean-retakes.py` writes it; `finish`, `concat-gen`, `kdenlive-gen`, `verify` read it.
@@ -117,8 +134,8 @@ changes cuts later: `ev2 clean`, then `ev2 finish`; rebuild the hook too if `hoo
   `ev2 clean <dir> --hook-split 20`, then rebuild the hook.
 - `segments`: the body's kept source ranges. Tune with `ev2 clean <dir> --keep 0.3 --busy-keep 1.2 --max-silence 0.6`.
 - `chapters`: `[{"src_t": <source seconds>, "title": "..."}]`, written at the PLAN gate.
-- `inserts`: `[{"name": "order-flow", "src_t": 126.0, "dur": 8, "recipe": "flow", "data": {...}}]`.
-  `name` kebab-case, unique; `src_t` SOURCE seconds (>= hook_split); `dur` 1.5-30 (4-12 is best);
+- `inserts`: `[{"name": "order-flow", "src_t": 126.0, "dur": 12, "recipe": "flow", "data": {...}}]`.
+  `name` kebab-case, unique; `src_t` SOURCE seconds (>= hook_split); `dur` 1.5-30 (8-14 is best);
   `recipe` one of flow, steps, checklist, compare, stat, statement, screens (data: `reference/recipes.md`);
   `cam` (default false for full scenes: the PiP fades out). No overlaps, none past the body end.
 - `callouts`: `[{"src_t": 91.2, "text": "Confirmer ici", "dur": 3}]` (+ optional `x`, `y` in cam_raw pixels).
@@ -153,6 +170,8 @@ Report every WARN to the user, never hide one. Never say "finished" or "ready to
 | beauty `body: monotony` WARN | Add an insert or a callout at the time it names (ask the creator what to show). |
 | beauty `text: description` FAIL | Delete the listed notes/paths from `out/youtube-description.md`. |
 | `inserts: fix these in work/timeline.json` | Each line names the insert and the field; fix it there. |
+| `insert "x" overlaps the chapter card` | Move its `src_t` ≥ `chapter_hold` s away from the chapter. |
+| `dur ... too short for N items` | Raise `dur` as the line says. |
 | Transcript has many wrong words | Use the Darija model (Setup), `ev2 asr-check`, fix terms in `darija-terms.json`. |
 | `transcribe: ... words.json was edited` | Keep it (skip transcribe), or `--force` (backup kept). |
 | verify: `hook build` FAIL | `ev2 hook <dir> --final`, then `ev2 finish <dir>`. |
@@ -163,6 +182,11 @@ Report every WARN to the user, never hide one. Never say "finished" or "ready to
 | Wrong brand colour | `ev2 look <dir> --accent "#RRGGBB"`, then hook + inserts + finish. |
 | `describe: ... was edited` | `--force` only if the creator agrees to lose the edits. |
 | concat-gen: `open in Concat` | Close the project in Concat, then `ev2 concat <dir>`. |
+| `camsync: could not sync by audio` | `ev2 init ... --cam FILE --cam-offset S` (S = camera time of the screen's start; measure with `camsync.py measure`). |
+| `ev2 rec: camera not recording` / log `cam.ok: false` | Close the Omarchy webcam overlay or other apps using the webcam; `ev2 rec cam test 5`. |
+| `transcribe: CUDA failed` | `ev2 doctor --install-gpu` (it continues on the CPU meanwhile). |
+| `body: joined N frames, expected M` | Delete `work/body_chunks/` and re-run `ev2 finish` (or `--jobs 1`). |
+| NVENC errors in any encode | `EV2_GPU=0` and report it. |
 
 Concat project (`concat --project <dir>/out/concat`): T4 main = `final.mp4` split at every cut;
 T1/T2 chapter and caption titles (hidden); T3 empty for overlays; T5 the original cuts (hidden, muted);
@@ -172,13 +196,13 @@ T6 empty for music; T7 inserts (hidden, reference). Regenerated by finish (an ed
 ```text
 <dir>/
 ├── build.py (automatic hook)  PLAN.md  kit.json  index.html  sfx-cues.txt  insert-<name>.html
-├── assets/media/   src.*  cam_raw.mp4 (1920x1080 30 CFR)  vo.wav (48k 24-bit stereo)
+├── assets/media/   src.*  cam_raw.mp4 (1920x1080 30 CFR)  vo.wav (48k 24-bit stereo)  cam_face.mp4  cam_src.*
 ├── assets/pro/     bg.png grain.png stills/      (the look: shared backdrop, clean screenshots)
 ├── assets/ev1/     tokens.css fonts/ vendor/gsap.min.js
-├── work/  timeline.json  hook.json  look.json  inputs.json  cuts.json  cuts-report.md  omarchy.json
-│          tx/{words.json,...}  activity.npz  zoom_plan.json  body_video.mp4  body_fx_cues.txt
+├── work/  timeline.json  hook.json  look.json  inputs.json  cuts.json  cuts-report.md  omarchy.json  camera.json
+│          tx/{words.json,...}  activity.npz  zoom_plan.json  body_video.mp4  body_fx_cues.txt  body_chunks/  draft/
 │          inserts/{<name>.mp4,<name>.cues.txt,<name>.json}  build.json  finish.json  ...
-└── out/   render.mp4  hook.mp4  final.mp4  short.mp4  youtube-chapters.txt  captions.srt
+└── out/   render.mp4  hook.mp4  final.mp4  short.mp4  draft.mp4  youtube-chapters.txt  captions.srt
            concat/  verify.md  beauty.md  beauty-sheet.jpg  youtube-description.md
 ```
 
@@ -187,4 +211,4 @@ T6 empty for music; T7 inserts (hidden, reference). Regenerated by finish (an ed
 - Captions / transcripts in Darija: `reference/darija-guide.md`. Sound roles: `reference/sound-design.md`.
 - Experts only (custom hook/scenes): `reference/devices.md`, `reference/look.md`, `template/build_custom.py`,
   `reference/sourcing.md` (footage + rights), `reference/edl/` (open one section at a time, never whole).
-- Tests: `scripts/test_pipeline.py` (assembly + failure paths), `components/test_components.py`, `components/test_pro.py`.
+- Tests: `scripts/test_pipeline.py` (assembly + failure paths), `scripts/test_v31.py` (v3.1 features), `components/test_components.py`, `components/test_pro.py`.

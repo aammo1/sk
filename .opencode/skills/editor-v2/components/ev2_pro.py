@@ -518,12 +518,29 @@ LOOK_DEFAULTS = {
     'click_fx': True,        # ripples on clicks (needs an input log from `ev2 rec`)
     'click_sfx': True,       # a soft click sound on each click
     'chapter_sfx': True,     # whoosh on each chapter card
+    'chapter_style': 'full', # chapters: "full" = full-page card that pauses the body, "bar" = lower-third
+    'chapter_hold': 2.8,     # seconds a full-page chapter card adds (2.0-4.0)
+    'insert_every': 60,      # suggest an explainer about every N body seconds (0 = off, 30-300)
+    'insert_hold': 4.0,      # finished explainer stays this long before its exit transition (2.0-8.0)
     'trim': 'auto',          # cut the window border / wallpaper slivers at the edges: "auto", "off" or [x, y, w, h]
     'auto_keys': True,       # shortcut pills from the input log
 }
 
 
+def _camera_mode_none(vd):
+    cp = os.path.join(vd, 'work', 'camera.json')
+    if not os.path.isfile(cp):
+        return False
+    try:
+        cj = json.load(open(cp, encoding='utf-8'))
+        return isinstance(cj, dict) and cj.get('mode') == 'none'
+    except (ValueError, OSError):
+        return False
+
+
 def cam_box_1080(vd):
+    if _camera_mode_none(vd):
+        return None
     p = os.path.join(vd, 'work', 'omarchy.json')
     if not os.path.isfile(p):
         return None
@@ -586,6 +603,12 @@ def ensure_look(vd, force=False):
     look['max_zoom'] = float(min(2.0, max(1.2, float(look.get('max_zoom', 1.6)))))
     if look.get('frame') not in ('inset', 'full'):
         raise SystemExit('work/look.json: frame must be "inset" or "full"')
+    if look.get('chapter_style') not in ('full', 'bar'):
+        raise SystemExit('work/look.json: chapter_style must be "full" or "bar"')
+    look['chapter_hold'] = float(min(4.0, max(2.0, float(look.get('chapter_hold', 2.8)))))
+    ie = int(round(float(look.get('insert_every', 60))))
+    look['insert_every'] = 0 if ie == 0 else max(30, min(300, ie))
+    look['insert_hold'] = float(min(8.0, max(2.0, float(look.get('insert_hold', 4.0)))))
     os.makedirs(os.path.dirname(lp), exist_ok=True)
     old = open(lp, encoding='utf-8').read() if os.path.isfile(lp) else ''
     new = json.dumps(look, indent=2, ensure_ascii=False) + '\n'
@@ -627,6 +650,8 @@ def paint_out(frame, box, pad=8):
 def tracked_cam_box(vd, src_t=None):
     """The webcam box (1920x1080 coords) as tracked by the body analysis (work/activity.npz),
     at src_t or the median over the recording; falls back to omarchy.json."""
+    if _camera_mode_none(vd):
+        return None
     p = os.path.join(vd, 'work', 'activity.npz')
     if os.path.isfile(p):
         cam = np.load(p, allow_pickle=False)['cam']
@@ -689,6 +714,19 @@ def stage_geometry(look, content):
     return (W - w) // 2, (H - h) // 2, w, h, int(round(22 * s / 0.9))
 
 
+PIP_CORNERS = ('top-left', 'top-right', 'bottom-left', 'bottom-right')
+PIP_ASPECT = 8 / 9          # w / h, same shape as Omarchy's webcam overlay
+PIP_H = 360                 # separate-camera PiP height on the 1920x1080 stage
+
+
+def pip_rect_corner(corner, w, h, m=40):
+    """(x, y, w, h) of a w x h PiP in a stage corner, even sizes."""
+    w, h = int(round(w / 2) * 2), int(round(h / 2) * 2)
+    x = W - m - w if corner.endswith('right') else m
+    y = H - m - h if corner.startswith('bottom') else m
+    return (int(x), int(y), w, h)
+
+
 def pip_rect(cam_box, look=None):
     """Where the speaker's PiP goes on the stage (same in the hook and the body):
     the corner nearest the webcam's corner, ~300 px tall. (x, y, w, h)."""
@@ -699,11 +737,157 @@ def pip_rect(cam_box, look=None):
     bw, bh = bw - 2 * inset, bh - 2 * inset
     h = min(420.0, max(270.0, bh * 1.35))
     w = h * bw / bh
+    if look and look.get('pip_corner', 'auto') in PIP_CORNERS:
+        return pip_rect_corner(look['pip_corner'], w, h)
     right, bottom = bx + bw / 2 > W / 2, by + bh / 2 > H / 2
     m = 40
     x = W - m - w if right else m
     y = H - m - h if bottom else m
     return (int(round(x)), int(round(y)), int(round(w / 2) * 2), int(round(h / 2) * 2))
+
+
+def detect_face_box(path, n=12):
+    """Median face box (x, y, w, h) in the video's pixels from n evenly spaced frames
+    (largest face per frame). None without the YuNet model or without faces."""
+    yp = os.path.expanduser('~/.cache/editor-v2/models/yunet.onnx')
+    if not os.path.isfile(yp):
+        return None
+    import cv2
+    vc = cv2.VideoCapture(path)
+    if not vc.isOpened():
+        vc.release()
+        return None
+    total = int(vc.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    if total <= 0:
+        vc.release()
+        return None
+    os.environ.setdefault('OPENCV_LOG_LEVEL', 'ERROR')
+    det = None
+    boxes = []
+    for k in range(n):
+        vc.set(cv2.CAP_PROP_POS_FRAMES, int(total * (0.05 + 0.9 * k / max(1, n - 1))))
+        ok, f = vc.read()
+        if not ok or f is None:
+            continue
+        fh, fw = f.shape[:2]
+        s = 960.0 / fw if fw != 960 else 1.0
+        if s != 1.0:
+            dw, dh = 960, max(1, int(round(fh * s)))
+            img = cv2.resize(f, (dw, dh), interpolation=cv2.INTER_AREA if s < 1.0 else cv2.INTER_LINEAR)
+        else:
+            dw, dh, img = fw, fh, f
+        if det is None:
+            det = cv2.FaceDetectorYN.create(yp, '', (dw, dh), 0.6)
+        else:
+            det.setInputSize((dw, dh))
+        _, faces = det.detect(np.ascontiguousarray(img))
+        if faces is not None and len(faces) > 0:
+            best = max(faces, key=lambda r: float(r[2]) * float(r[3]))
+            boxes.append([float(v) / s for v in best[:4]])
+    vc.release()
+    if len(boxes) < 3:
+        return None
+    return tuple(float(v) for v in np.median(boxes, axis=0))
+
+
+def cam_crop(face, fw, fh, aspect=PIP_ASPECT):
+    """The part of the camera frame shown in the PiP: aspect w/h, head in the upper part."""
+    if face:
+        x, y, w, h = face
+        ch = min(float(fh), h * 3.0)
+        cw = ch * aspect
+        if cw > fw:
+            cw = float(fw)
+            ch = cw / aspect
+        cx = x + w / 2
+        cy = y + h / 2 + 0.15 * ch          # face centre at ~35% from the top
+    else:
+        ch = float(fh)
+        cw = ch * aspect
+        if cw > fw:
+            cw = float(fw)
+            ch = cw / aspect
+        cx, cy = fw / 2, fh / 2
+    cw_i = min(int(fw), int(round(cw / 2) * 2))
+    ch_i = min(int(fh), int(round(ch / 2) * 2))
+    x0 = min(max(0.0, cx - cw_i / 2), max(0.0, fw - cw_i))
+    y0 = min(max(0.0, cy - ch_i / 2), max(0.0, fh - ch_i))
+    xi = min(max(0, int(round(x0))), max(0, int(fw) - cw_i))
+    yi = min(max(0, int(round(y0))), max(0, int(fh) - ch_i))
+    return (xi, yi, cw_i, ch_i)
+
+
+def camera_source(vd, look=None):
+    """Where the speaker comes from. Returns one of
+       {'mode': 'separate', 'path': <abs cam_face.mp4>, 'rel': 'assets/media/cam_face.mp4',
+        'size': (fw, fh), 'crop': (x, y, w, h) in camera pixels, 'face_box': ...,
+        'pip_rect': (x, y, w, h) on the stage, 'camera': <camera.json dict>}
+       {'mode': 'overlay', 'box': (x, y, w, h), 'pip_rect': pip_rect(box, look)}
+       {'mode': 'none'}"""
+    if look is None:
+        lp = os.path.join(vd, 'work', 'look.json')
+        if os.path.isfile(lp):
+            try:
+                look = json.load(open(lp, encoding='utf-8'))
+            except ValueError as e:
+                raise SystemExit(f'work/look.json is not valid JSON: {e}')
+        else:
+            look = {}
+    cp = os.path.join(vd, 'work', 'camera.json')
+    if os.path.isfile(cp):
+        try:
+            cj = json.load(open(cp, encoding='utf-8'))
+        except ValueError as e:
+            raise SystemExit(f'work/camera.json: invalid JSON ({e})')
+        if not isinstance(cj, dict):
+            raise SystemExit('work/camera.json: expected a JSON object')
+        if cj.get('mode') == 'none':
+            return {'mode': 'none'}
+        if cj.get('mode') == 'separate':
+            rel = cj.get('file')
+            if not rel or not isinstance(rel, str):
+                raise SystemExit('work/camera.json: missing "file"')
+            cam_path = os.path.abspath(os.path.join(vd, rel))
+            if os.path.isfile(cam_path):
+                fw, fh = cj.get('width'), cj.get('height')
+                if (isinstance(fw, bool) or isinstance(fh, bool)
+                        or not isinstance(fw, (int, float)) or not isinstance(fh, (int, float))
+                        or fw <= 0 or fh <= 0):
+                    raise SystemExit('work/camera.json: missing or invalid width/height')
+                face = cj.get('face_box')
+                if face is not None:
+                    if (not isinstance(face, (list, tuple)) or len(face) != 4
+                            or not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in face)):
+                        raise SystemExit('work/camera.json: face_box must be [x, y, w, h]')
+                    face = tuple(float(v) for v in face)
+                else:
+                    face = detect_face_box(cam_path)
+                    if face is not None:
+                        cj['face_box'] = [round(v, 1) for v in face]
+                        with open(cp, 'w', encoding='utf-8') as fh_out:
+                            json.dump(cj, fh_out, indent=2, ensure_ascii=False)
+                            fh_out.write('\n')
+                        face = tuple(float(v) for v in cj['face_box'])
+                crop = cam_crop(face, fw, fh)
+                corner = look.get('pip_corner', 'auto') or 'auto'
+                if corner == 'auto':
+                    corner = 'bottom-right'
+                elif corner not in PIP_CORNERS:
+                    raise SystemExit(f'work/look.json: pip_corner must be "auto" or one of {PIP_CORNERS} (got {corner!r})')
+                return {
+                    'mode': 'separate',
+                    'path': cam_path,
+                    'rel': rel,
+                    'size': (int(fw), int(fh)),
+                    'crop': crop,
+                    'face_box': face,
+                    'pip_rect': pip_rect_corner(corner, PIP_H * PIP_ASPECT, PIP_H),
+                    'camera': cj,
+                }
+    box = tracked_cam_box(vd)
+    if box:
+        return {'mode': 'overlay', 'box': box, 'pip_rect': pip_rect(box, look)}
+    return {'mode': 'none'}
 
 
 def detect_trim(vd, n=16):

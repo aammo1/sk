@@ -87,6 +87,10 @@ def main():
                         help='Path to omarchy.json metadata (auto-detected if omitted)')
     parser.add_argument('--stack-cam', action='store_true',
                         help='Stack cropped Omarchy webcam in bottom third and screencast in top two-thirds')
+    parser.add_argument('--cam-file', default=None,
+                        help='Separate camera video file for --stack-cam (auto-detected from work/camera.json if omitted)')
+    parser.add_argument('--cam-crop', default=None,
+                        help='Optional camera crop x,y,w,h when using --cam-file')
     parser.add_argument('--framing', default='fit', choices=['fit', 'crop', '8:9'],
                         help='Framing mode for standard overlay (fit=1080x608, crop/8:9=1080x1215)')
     args = parser.parse_args()
@@ -135,16 +139,75 @@ def main():
         except Exception as e:
             print(f"Warning: could not read {omarchy_path}: {e}", file=sys.stderr)
 
+    cam_crop_box = None
+    if args.cam_crop:
+        parts = [p.strip() for p in args.cam_crop.split(',')]
+        if len(parts) != 4:
+            print(f"Error: --cam-crop must be x,y,w,h (got {args.cam_crop!r})", file=sys.stderr)
+            sys.exit(1)
+        try:
+            cx, cy, cw, ch = (float(p) for p in parts)
+        except ValueError:
+            print(f"Error: --cam-crop must be numeric x,y,w,h (got {args.cam_crop!r})", file=sys.stderr)
+            sys.exit(1)
+        if cw <= 0 or ch <= 0:
+            print(f"Error: --cam-crop width and height must be > 0 (got {args.cam_crop!r})", file=sys.stderr)
+            sys.exit(1)
+        cam_crop_box = (
+            int(cx) if cx.is_integer() else cx,
+            int(cy) if cy.is_integer() else cy,
+            int(cw) if cw.is_integer() else cw,
+            int(ch) if ch.is_integer() else ch,
+        )
+
     use_stacked_cam = False
     webcam_box = None
+    cam_file = None
     if args.stack_cam:
-        if omarchy_data and omarchy_data.get('has_webcam_overlay') and omarchy_data.get('webcam_box'):
+        if args.cam_file:
+            cam_file = os.path.abspath(args.cam_file)
+            if not os.path.isfile(cam_file):
+                print(f"Error: camera file does not exist: {cam_file}", file=sys.stderr)
+                sys.exit(1)
+            use_stacked_cam = True
+        else:
+            cam_candidates = []
+            if omarchy_path:
+                cam_candidates.append(os.path.join(os.path.dirname(os.path.abspath(omarchy_path)), 'camera.json'))
+            cam_candidates.extend([
+                os.path.join(os.path.dirname(in_path), 'work', 'camera.json'),
+                os.path.join(os.path.dirname(os.path.dirname(in_path)), 'work', 'camera.json'),
+                os.path.join(out_dir, '..', 'work', 'camera.json'),
+                'work/camera.json',
+                'camera.json',
+            ])
+            cam_mode_none = False
+            for c in cam_candidates:
+                if os.path.isfile(c):
+                    try:
+                        with open(c, 'r', encoding='utf-8') as f:
+                            cj = json.load(f)
+                    except Exception as e:
+                        print(f"Warning: could not read {c}: {e}", file=sys.stderr)
+                        continue
+                    if isinstance(cj, dict) and cj.get('mode') == 'none':
+                        cam_mode_none = True
+                        break
+                    if isinstance(cj, dict) and cj.get('mode') == 'separate' and cj.get('file'):
+                        c_dir = os.path.dirname(os.path.abspath(c))
+                        vd_guess = os.path.dirname(c_dir) if os.path.basename(c_dir) == 'work' else c_dir
+                        cand = os.path.abspath(os.path.join(vd_guess, cj['file']))
+                        if os.path.isfile(cand):
+                            cam_file = cand
+                            use_stacked_cam = True
+                            break
+        if not use_stacked_cam and not cam_mode_none and omarchy_data and omarchy_data.get('has_webcam_overlay') and omarchy_data.get('webcam_box'):
             box = omarchy_data['webcam_box']
             if isinstance(box, (list, tuple)) and len(box) == 4:
                 webcam_box = box
                 use_stacked_cam = True
         if not use_stacked_cam:
-            print("Warning: --stack-cam requested, but no valid webcam overlay found in omarchy.json. "
+            print("Warning: --stack-cam requested, but no valid webcam overlay or separate camera found. "
                   "Using centered framing instead.", file=sys.stderr)
 
     # Build FFmpeg filter_complex
@@ -157,11 +220,22 @@ def main():
     )
 
     if use_stacked_cam:
-        bx, by, bw, bh = webcam_box
-        fg_filter = (
-            f"[0:v]crop=w='min(iw,ih*1080/1280)':h='ih':x='(iw-ow)/2':y=0,scale=1080:1280[screen];"
-            f"[0:v]crop=w={bw}:h={bh}:x={bx}:y={by},scale=1080:640:force_original_aspect_ratio=increase,crop=1080:640[cam]"
-        )
+        if cam_file:
+            if cam_crop_box:
+                cx, cy, cw, ch = cam_crop_box
+                cam_seg = f"[1:v]crop=w={cw}:h={ch}:x={cx}:y={cy},scale=1080:640:force_original_aspect_ratio=increase,crop=1080:640[cam]"
+            else:
+                cam_seg = "[1:v]scale=1080:640:force_original_aspect_ratio=increase,crop=1080:640[cam]"
+            fg_filter = (
+                "[0:v]crop=w='min(iw,ih*1080/1280)':h='ih':x='(iw-ow)/2':y=0,scale=1080:1280[screen];"
+                + cam_seg
+            )
+        else:
+            bx, by, bw, bh = webcam_box
+            fg_filter = (
+                f"[0:v]crop=w='min(iw,ih*1080/1280)':h='ih':x='(iw-ow)/2':y=0,scale=1080:1280[screen];"
+                f"[0:v]crop=w={bw}:h={bh}:x={bx}:y={by},scale=1080:640:force_original_aspect_ratio=increase,crop=1080:640[cam]"
+            )
         comp_filter = (
             "[bg][screen]overlay=0:0[bg_scr];"
             "[bg_scr][cam]overlay=0:1280[v]"
@@ -178,21 +252,28 @@ def main():
         filter_complex = f"{bg_filter};{fg_filter};{comp_filter}"
 
     # Construct ffmpeg command
-    cmd = [
-        'ffmpeg', '-y',
-        '-i', in_path,
+    cmd = ['ffmpeg', '-y', '-i', in_path]
+    if cam_file:
+        cmd.extend(['-i', cam_file])
+    cmd.extend([
         '-filter_complex', filter_complex,
         '-map', '[v]',
-    ]
+    ])
 
     if info['has_audio']:
         cmd.extend(['-map', '0:a:0?', '-c:a', 'aac', '-b:a', '192k'])
 
+    venc_args = ['-c:v', 'libx264', '-crf', '18', '-preset', 'fast']
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import gpu
+        venc_args = gpu.venc(venc_args, 18)
+    except ImportError:
+        pass
+
     cmd.extend([
         '-t', str(target_dur),
-        '-c:v', 'libx264',
-        '-crf', '18',
-        '-preset', 'fast',
+        *venc_args,
         '-pix_fmt', 'yuv420p',
         '-r', '30',
         out_path

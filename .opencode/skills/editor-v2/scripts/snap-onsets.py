@@ -59,9 +59,12 @@ def main():
     if not os.path.isfile(wp):
         sys.exit(f'snap-onsets: no transcript words found at {wp}: run transcribe.py first')
 
+    is_script = TL.is_script_words(vd)
     untouched = TL.words_edited(vd) is False   # only then may this automatic write be re-stamped
     with open(wp, 'r', encoding='utf-8') as f:
-        words = sorted(json.load(f), key=lambda item: item['s'])
+        raw_words = json.load(f)
+    words = raw_words.get('words', []) if isinstance(raw_words, dict) else raw_words
+    words = sorted(words, key=lambda item: item['s'])
 
     if not words:
         print('snap-onsets: words list is empty, nothing to snap.')
@@ -90,6 +93,10 @@ def main():
     with open(sil_file, 'w', encoding='utf-8') as f:
         for s, e in sil:
             f.write(f'{s:.3f} {e:.3f}\n')
+
+    if is_script:
+        print(f'snap-onsets: {len(sil)} pauses -> {sil_file} (script words preserved)')
+        return
 
     used, moved = set(), []
     for s, e in sil:

@@ -58,6 +58,7 @@ SCHEMA = 1
 FPS = 30
 SR = 48000
 SAMPLES_PER_FRAME = SR // FPS  # 1600
+CHAPTER_STYLE_DEFAULT, CHAPTER_HOLD_DEFAULT = 'full', 2.8
 
 
 class TimelineError(Exception):
@@ -77,6 +78,26 @@ def frames(t, fps=FPS):
     return int(round(float(t) * fps))
 
 
+def chapter_look(vd):
+    """(style, hold) from work/look.json with defaults."""
+    lp = os.path.join(vd, 'work', 'look.json')
+    if not os.path.isfile(lp):
+        return CHAPTER_STYLE_DEFAULT, CHAPTER_HOLD_DEFAULT
+    try:
+        with open(lp, 'r', encoding='utf-8') as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return CHAPTER_STYLE_DEFAULT, CHAPTER_HOLD_DEFAULT
+    if not isinstance(d, dict):
+        return CHAPTER_STYLE_DEFAULT, CHAPTER_HOLD_DEFAULT
+    style = d.get('chapter_style', CHAPTER_STYLE_DEFAULT)
+    if style not in ('full', 'bar'):
+        style = CHAPTER_STYLE_DEFAULT
+    hold = d.get('chapter_hold', CHAPTER_HOLD_DEFAULT)
+    hold = max(2.0, min(4.0, float(hold))) if _num(hold) else CHAPTER_HOLD_DEFAULT
+    return style, hold
+
+
 def load(vd, required=True):
     p = tl_path(vd)
     if not os.path.isfile(p):
@@ -86,6 +107,8 @@ def load(vd, required=True):
     with open(p, 'r', encoding='utf-8') as f:
         tl = json.load(f)
     validate(tl)
+    s, h = chapter_look(vd)
+    tl['_chapter_cards'] = {'style': s, 'hold': h}
     return tl
 
 
@@ -93,11 +116,12 @@ def save(vd, tl):
     tl['schema'] = SCHEMA
     tl['updated'] = datetime.datetime.now().replace(microsecond=0).isoformat()
     validate(tl)
+    out = {k: v for k, v in tl.items() if not k.startswith('_')}
     p = tl_path(vd)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     tmp = p + '.tmp'
     with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(tl, f, indent=2, ensure_ascii=False)
+        json.dump(out, f, indent=2, ensure_ascii=False)
         f.write('\n')
     os.replace(tmp, p)
     return p
@@ -271,36 +295,115 @@ def _validate_callouts(tl, hs):
                 raise TimelineError(f'{who}: "{k}" must be a number (cam_raw pixels)')
 
 
+def _card_cfg(tl):
+    cc = tl.get('_chapter_cards')
+    if not isinstance(cc, dict):
+        return 'bar', CHAPTER_HOLD_DEFAULT
+    style = cc.get('style', 'bar')
+    if style not in ('full', 'bar'):
+        style = 'bar'
+    hold = cc.get('hold', CHAPTER_HOLD_DEFAULT)
+    hold = float(hold) if _num(hold) else CHAPTER_HOLD_DEFAULT
+    return style, hold
+
+
 def cut_signature(tl):
-    """Hash of everything that changes the assembled picture/sound (not chapters)."""
-    key = json.dumps({'source': tl.get('source'), 'hook_split': tl['hook_split'],
-                      'segments': tl.get('segments', [])}, sort_keys=True)
+    """Hash of everything that changes the assembled picture/sound (and full-page chapter cards)."""
+    d = {'source': tl.get('source'), 'hook_split': tl['hook_split'],
+         'segments': tl.get('segments', [])}
+    style, _ = _card_cfg(tl)
+    if style == 'full':
+        d['chapter_cards'] = tl.get('_chapter_cards')
+        d['chapters'] = [{'src_t': c['src_t'], 'title': c['title']} for c in (tl.get('chapters') or [])]
+    key = json.dumps(d, sort_keys=True)
     return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+def _base_segments(tl):
+    out = []
+    for s in tl.get('segments') or []:
+        a, b = frames(s['src_start']), frames(s['src_end'])
+        if b > a:
+            out.append((a, b))
+    return out
+
+
+def _snap_chapters(tl, base):
+    """Sorted valid body chapters mapped to (seg_idx, f_card, card_index, title)."""
+    hs = float(tl['hook_split'])
+    chs = sorted((c for c in (tl.get('chapters') or []) if float(c['src_t']) >= hs - 1e-6),
+                 key=lambda c: float(c['src_t']))
+    out, idx = [], 0
+    for c in chs:
+        f = frames(c['src_t'])
+        for si, (a, b) in enumerate(base):
+            if f < a:
+                out.append((si, a, idx, c['title']))
+                idx += 1
+                break
+            if f < b:
+                out.append((si, f, idx, c['title']))
+                idx += 1
+                break
+    return out
 
 
 def body_segments(tl):
     """Segments with out_start/out_end (body-relative) added, frame-exact."""
-    out, pos = [], 0
-    for s in tl.get('segments') or []:
-        a, b = frames(s['src_start']), frames(s['src_end'])
-        n = b - a
-        if n <= 0:
-            continue
-        out.append({'src_start': a / FPS, 'src_end': b / FPS,
-                    'f_start': a, 'f_end': b,
-                    'out_start': pos / FPS, 'out_end': (pos + n) / FPS})
-        pos += n
+    base = _base_segments(tl)
+    style, hold = _card_cfg(tl)
+    by_seg = {}
+    if style == 'full' and base and tl.get('chapters'):
+        for si, f_card, idx, title in _snap_chapters(tl, base):
+            by_seg.setdefault(si, []).append((f_card, idx, title))
+    out, pos, n_card = [], 0, frames(hold)
+    for si, (a, b) in enumerate(base):
+        cur = a
+        for f_card, idx, title in by_seg.get(si, []):
+            if f_card > cur:
+                n = f_card - cur
+                out.append({'card': False, 'src_start': cur / FPS, 'src_end': f_card / FPS,
+                            'f_start': cur, 'f_end': f_card,
+                            'out_start': pos / FPS, 'out_end': (pos + n) / FPS})
+                pos += n
+                cur = f_card
+            t_card = f_card / FPS
+            out.append({'card': True, 'title': title, 'index': idx,
+                        'src_start': t_card, 'src_end': t_card,
+                        'f_start': f_card, 'f_end': f_card,
+                        'out_start': pos / FPS, 'out_end': (pos + n_card) / FPS, 'n': n_card})
+            pos += n_card
+        if b > cur:
+            n = b - cur
+            out.append({'card': False, 'src_start': cur / FPS, 'src_end': b / FPS,
+                        'f_start': cur, 'f_end': b,
+                        'out_start': pos / FPS, 'out_end': (pos + n) / FPS})
+            pos += n
     return out
 
 
+def card_segments(tl):
+    """Chapter card segments in body_segments(tl)."""
+    return [s for s in body_segments(tl) if s.get('card')]
+
+
+def _body_frames(segs):
+    return sum(s['n'] if s.get('card') else s['f_end'] - s['f_start'] for s in segs)
+
+
 def body_duration(tl):
-    return sum(frames(s['src_end']) - frames(s['src_start']) for s in tl.get('segments') or [])/FPS
+    return _body_frames(body_segments(tl)) / FPS
 
 
 def src_to_body(tl, t):
     """Body-relative output time of source time t; snaps forward into the next kept segment
     when t falls inside a cut. None when t is after the last kept segment."""
+    half_f = 0.5 / FPS
     for s in body_segments(tl):
+        if s.get('card'):
+            if abs(t - s['src_start']) <= half_f:
+                return s['out_start']
+            continue
         if t < s['src_start']:
             return s['out_start']
         if t < s['src_end']:
@@ -316,10 +419,21 @@ def final_chapters(tl, hook_dur, hook_chapters=None):
             out.append((float(t), title))
     if not any(t < 0.05 for t, _ in out):
         out.append((0.0, tl.get('hook_title') or 'Intro'))
-    for c in tl.get('chapters') or []:
-        bt = src_to_body(tl, float(c['src_t']))
-        if bt is not None:
-            out.append((hook_dur + bt, c['title']))
+    style, _ = _card_cfg(tl)
+    if style == 'full':
+        for c in card_segments(tl):
+            out.append((hook_dur + c['out_start'], c['title']))
+        hs = float(tl['hook_split'])
+        for c in tl.get('chapters') or []:
+            if float(c['src_t']) < hs - 1e-6:
+                bt = src_to_body(tl, float(c['src_t']))
+                if bt is not None:
+                    out.append((hook_dur + bt, c['title']))
+    else:
+        for c in tl.get('chapters') or []:
+            bt = src_to_body(tl, float(c['src_t']))
+            if bt is not None:
+                out.append((hook_dur + bt, c['title']))
     out.sort(key=lambda x: x[0])
     return out
 
@@ -327,7 +441,8 @@ def final_chapters(tl, hook_dur, hook_chapters=None):
 def insert_ranges(tl):
     """Inserts in BODY frames, sorted: [{'name','mode','cam','f0','n','body_t','dur','src_t'}].
     f0 = first body frame (0 = first frame after the hook), n = frame count."""
-    total = sum(s['f_end'] - s['f_start'] for s in body_segments(tl))
+    segs = body_segments(tl)
+    total = _body_frames(segs)
     out = []
     for ins in tl.get('inserts') or []:
         name = ins['name']
@@ -345,6 +460,17 @@ def insert_ranges(tl):
     for a, b in zip(out, out[1:]):
         if b['f0'] < a['f0'] + a['n']:
             raise TimelineError(f'inserts "{a["name"]}" and "{b["name"]}" overlap: move one or shorten dur')
+    _, hold = _card_cfg(tl)
+    for r in out:
+        r0, r1 = r['f0'], r['f0'] + r['n']
+        for c in segs:
+            if not c.get('card'):
+                continue
+            c0 = frames(c['out_start'])
+            c1 = c0 + c['n']
+            if r0 < c1 and c0 < r1:
+                raise TimelineError(f'insert "{r["name"]}" overlaps the chapter card "{c["title"]}": '
+                                    f'move src_t at least {hold:g} s away from the chapter')
     return out
 
 
@@ -368,7 +494,7 @@ def key_ranges(tl):
     """Key pills in BODY frames, sorted:
     [{'i','keys','label','f0','n','body_t','dur','sfx','pos','src_t'}] (i = 1-based index in "keys").
     A pill that runs past the body end is shortened, not rejected."""
-    total = sum(s['f_end'] - s['f_start'] for s in body_segments(tl))
+    total = _body_frames(body_segments(tl))
     out = []
     for i, kp in enumerate(tl.get('keys') or [], 1):
         who = _key_name(i, kp)
@@ -451,6 +577,24 @@ def words_edited(vd):
         return json.load(open(sp)).get('sha') != sha256_file(wp)
     except (ValueError, OSError):
         return 'unknown'
+
+
+def is_script_words(vd):
+    """True when work/tx/words.json originates from a tutorial-director script (no ASR needed)."""
+    wp, sp = words_paths(vd)
+    if not os.path.isfile(wp):
+        return False
+    if os.path.isfile(sp):
+        try:
+            if json.load(open(sp, encoding='utf-8')).get('source') == 'script':
+                return True
+        except (ValueError, OSError):
+            pass
+    try:
+        data = json.load(open(wp, encoding='utf-8'))
+        return isinstance(data, dict) and data.get('source') == 'script'
+    except (ValueError, OSError):
+        return False
 
 
 def sha256_file(p, limit=None):

@@ -28,6 +28,13 @@ def main():
 
     vd = os.path.abspath(a.video_dir)
     tl = TL.load(vd)
+    fin_path = os.path.join(vd, 'work', 'finish.json')
+    if os.path.isfile(fin_path):
+        with open(fin_path, encoding='utf-8') as f:
+            fin = json.load(f)
+        if fin and fin.get('raw_body'):
+            tl = dict(tl, _chapter_cards={'style': 'bar',
+                                          'hold': (tl.get('_chapter_cards') or {}).get('hold', TL.CHAPTER_HOLD_DEFAULT)})
     segs = TL.body_segments(tl)
     NH = TL.frames(tl['hook_split'])
     final = os.path.join(vd, 'out', 'final.mp4')
@@ -48,8 +55,18 @@ def main():
     if NH:
         ET.SubElement(v1, 'entry', {'producer': 'final', 'in': '0', 'out': str(NH - 1)})
     pos = NH
+    body_n = card_n = 0
     for s in segs:
-        n = s['f_end'] - s['f_start']
+        if s.get('card'):
+            n = s['n'] if 'n' in s else TL.frames(s['out_end'] - s['out_start'])
+            if n <= 0:
+                continue
+            card_n += 1
+        else:
+            n = s['f_end'] - s['f_start']
+            if n <= 0:
+                continue
+            body_n += 1
         ET.SubElement(v1, 'entry', {'producer': 'final', 'in': str(pos), 'out': str(pos + n - 1)})
         pos += n
 
@@ -68,7 +85,8 @@ def main():
     ET.ElementTree(root).write(out, encoding='utf-8', xml_declaration=True)
     ET.parse(out)
     print(f'kdenlive-gen: {out}')
-    print(f'  V1 {1 if NH else 0} hook + {len(segs)} body entries = {pos} frames ({pos / TL.FPS:.2f}s); {len(guides)} guides')
+    card_note = f' + {card_n} chapter cards' if card_n else ''
+    print(f'  V1 {1 if NH else 0} hook + {body_n} body entries{card_note} = {pos} frames ({pos / TL.FPS:.2f}s); {len(guides)} guides')
 
 
 if __name__ == '__main__':

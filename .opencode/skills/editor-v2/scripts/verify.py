@@ -138,7 +138,10 @@ def picture_sync(segs, NH, R=24, L=8, n_pick=5, exclude=()):
     the redrawn webcam change the picture but not WHEN the screen changes."""
     if not segs or not os.path.isfile('assets/media/cam_raw.mp4'):
         return None, 'no body or no cam_raw.mp4'
-    src = np.concatenate([np.arange(s['f_start'], s['f_end']) for s in segs])
+    src = np.concatenate([
+        np.full(s['n'], -1, dtype=np.int64) if s.get('card') else np.arange(s['f_start'], s['f_end'], dtype=np.int64)
+        for s in segs
+    ])
     nb = len(src)
     if nb < 4 * R:
         return None, 'body too short to cross-check'
@@ -150,13 +153,15 @@ def picture_sync(segs, NH, R=24, L=8, n_pick=5, exclude=()):
         score = frac[np.clip(src[cand] // step, 0, len(frac) - 1)]
     else:
         cand = np.linspace(R + 1, nb - R - 2, 15).astype(int)
-    if len(exclude):
-        keep = np.array([not any(f0 - R - 9 <= b <= f0 + n + R + 9 for f0, n in exclude) for b in cand], dtype=bool)
+    all_exclude = list(exclude) + [(TL.frames(s['out_start']), s['n']) for s in segs if s.get('card')]
+    if all_exclude or (src < 0).any():
+        keep = np.array([src[b] >= 0 and not any(f0 - R - 9 <= b <= f0 + n + R + 9 for f0, n in all_exclude)
+                         for b in cand], dtype=bool)
         cand = cand[keep]
         if score is not None:
             score = score[keep]
         if not len(cand):
-            return None, 'no screen event outside the inserts to cross-check'
+            return None, 'no screen event outside inserts/cards to cross-check'
     order = np.argsort(-score) if score is not None else np.arange(len(cand))
     picks = []
     for k in order:
@@ -170,6 +175,8 @@ def picture_sync(segs, NH, R=24, L=8, n_pick=5, exclude=()):
     checked, bad = 0, []
     for b in sorted(picks):
         exp_src = src[b - R:b + R + 1]
+        if (exp_src < 0).any():
+            continue
         lo, hi = int(exp_src.min()), int(exp_src.max())
         cam = gray_frames('assets/media/cam_raw.mp4', lo, hi - lo + 1)
         if len(cam) < hi - lo + 1:
@@ -260,11 +267,14 @@ def main():
     except TL.TimelineError as e:
         add('FAIL', 'timeline', str(e))
         return report(vd)
+    fin = json.load(open('work/finish.json')) if os.path.isfile('work/finish.json') else None
+    if fin and fin.get('raw_body'):
+        tl = dict(tl, _chapter_cards={'style': 'bar',
+                                      'hold': (tl.get('_chapter_cards') or {}).get('hold', TL.CHAPTER_HOLD_DEFAULT)})
     segs = TL.body_segments(tl)
     H = TL.frames(tl['hook_split']) / FPS
-    body = sum(s['f_end'] - s['f_start'] for s in segs) / FPS
+    body = TL.body_duration(tl)
     expected = H + body
-    fin = json.load(open('work/finish.json')) if os.path.isfile('work/finish.json') else None
 
     if not fin:
         add('FAIL', 'finish', 'work/finish.json missing: run `ev2 finish <video-dir>`')
@@ -348,7 +358,7 @@ def main():
     sr = 8000
     global VOICE
     VOICE = 'work/vo_clean.wav' if os.path.isfile('work/vo_clean.wav') else 'assets/media/vo.wav'
-    long_segs = [s for s in segs if s['out_end'] - s['out_start'] >= 1.0]
+    long_segs = [s for s in segs if not s.get('card') and s['out_end'] - s['out_start'] >= 1.0]
     picks = [long_segs[int(len(long_segs) * f)] for f in (0.1, 0.3, 0.5, 0.7, 0.9)] if long_segs else []
     checked, bad = 0, []
     for s in dict((id(x), x) for x in picks).values():
@@ -356,7 +366,8 @@ def main():
         win = min(2.0, seg_len * 0.8)
         mid = s['src_start'] + (seg_len - win) / 2
         ref = audio_at(VOICE, mid, win, sr)
-        ft = H + s['out_start'] + (mid - s['src_start'])
+        bt = TL.src_to_body(tl, mid)
+        ft = H + (s['out_start'] + (mid - s['src_start']) if bt is None else bt)
         sig = audio_at('out/final.mp4', ft, win, sr)
         lag, peak = lag_of(ref, sig, sr)
         if lag is None or peak < 0.5:
@@ -371,13 +382,25 @@ def main():
     else:
         add('WARN', 'voice sync', 'no body window had enough speech to cross-check')
 
-    ok, detail = picture_sync(segs, TL.frames(tl['hook_split']), exclude=[(i['f0'], i['n']) for i in ins_list])
+    exclude = [(i['f0'], i['n']) for i in ins_list] + [(TL.frames(s['out_start']), s['n']) for s in segs if s.get('card')]
+    ok, detail = picture_sync(segs, TL.frames(tl['hook_split']), exclude=exclude)
     add({True: 'PASS', False: 'FAIL', None: 'WARN'}[ok], 'picture sync', detail)
 
     # hook
     zp = 'work/body_video.json'
     if os.path.isfile(zp):
-        add('PASS', 'body polish', f'{json.load(open(zp)).get("zoomed_share", 0) * 100:.0f}% of the body zoomed; webcam PiP + chapter cards')
+        bv = json.load(open(zp))
+        pip_lbl = 'webcam PiP' if bv.get('pip', True) else 'no PiP'
+        add('PASS', 'body polish', f'{bv.get("zoomed_share", 0) * 100:.0f}% of the body zoomed; {pip_lbl} + chapter cards')
+    card_style = (tl.get('_chapter_cards') or {}).get('style', 'bar')
+    if fin and fin.get('raw_body'):
+        add('WARN', 'chapter cards', 'skipped (--raw-body)')
+    elif card_style == 'full':
+        cards = TL.card_segments(tl)
+        extra = sum(c['n'] for c in cards) / FPS
+        add('PASS', 'chapter cards', f'{len(cards)} full-page cards, +{extra:.1f}s')
+    else:
+        add('PASS', 'chapter cards', 'lower-third')
     if os.path.isfile('out/captions.srt'):
         add('PASS', 'captions.srt', f'{open("out/captions.srt", encoding="utf-8").read().count(" --> ")} captions')
     if H > 0:

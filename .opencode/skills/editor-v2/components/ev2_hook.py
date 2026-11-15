@@ -113,6 +113,8 @@ def _thumbs(vd):
 
 def _kept(segs, t, dur):
     for s in segs:
+        if s.get('card'):
+            continue
         if s['src_start'] <= t and t + dur <= s['src_end']:
             return True
     return False
@@ -122,7 +124,7 @@ def pick_moments(vd, tl, n, dur=2.6):
     """n moments of the tutorial body worth showing: one per chapter (spread when there are
     more chapters than shots), each the most detailed, gently active, kept stretch, all different."""
     import cv2
-    segs = TL.body_segments(tl)
+    segs = [s for s in TL.body_segments(tl) if not s.get('card')]
     if not segs:
         raise HookError('timeline has no body segments')
     act = _activity(vd)
@@ -254,36 +256,50 @@ def action_bbox(act, t, dur):
 
 
 # ------------------------------------------------------------------ pieces
-def video_card(c, t0, t1, media_t, crop, x, y, w, h, z, cid=None, radius=22, cls='pro-shot'):
-    """A card showing part of the recording (crop of the 1920x1080 frame) as live video.
+def video_card(c, t0, t1, media_t, crop, x, y, w, h, z, cid=None, radius=22, cls='pro-shot',
+               src='assets/media/cam_raw.mp4', src_size=(W, H)):
+    """A card showing part of the recording (crop of the source frame) as live video.
     The card is an untimed wrapper (shown for [t0, t1) by the timeline); returns its id."""
     cid = cid or c.uid('pvc')
     vid = c.uid('pvv')
     cx, cy, cw, ch = crop
+    sw, sh = src_size
     k = w / cw
     c.at(f'tl.set("#{cid}",{{visibility:"visible"}},{fr(t0):.4f});tl.set("#{cid}",{{visibility:"hidden"}},{fr(t1):.4f});')
     c.els.append(
         f'<div id="{cid}" class="{cls}" style="left:{x:.0f}px;top:{y:.0f}px;width:{w:.0f}px;height:{h:.0f}px;'
         f'border-radius:{radius}px;z-index:{z};visibility:hidden">'
-        f'<video id="{vid}" class="clip" src="assets/media/cam_raw.mp4" muted playsinline data-start="{fr(t0):.4f}" '
+        f'<video id="{vid}" class="clip" src="{src}" muted playsinline data-start="{fr(t0):.4f}" '
         f'data-duration="{dstr(t0, t1)}" data-media-start="{max(0.0, media_t):.4f}" '
-        f'style="position:absolute;left:{-cx * k:.1f}px;top:{-cy * k:.1f}px;width:{W * k:.1f}px;height:{H * k:.1f}px;'
+        f'style="position:absolute;left:{-cx * k:.1f}px;top:{-cy * k:.1f}px;width:{sw * k:.1f}px;height:{sh * k:.1f}px;'
         f'max-width:none;display:block"></video></div>')
     return cid
 
 
-def presenter(c, t0, t1, cam, z=60):
+def _style_presenter(c, pid, t0):
+    c.css.append(f'#{pid}{{overflow:hidden;border:3px solid rgba(255,255,255,0.9);box-shadow:0 24px 60px rgba(0,0,0,0.6)}}')
+    c.pre.append(f'gsap.set("#{pid}",{{opacity:0,scale:0.8,y:30}});')
+    c.at(f'tl.fromTo("#{pid}",{{opacity:0,scale:0.8,y:30}},{{opacity:1,scale:1,y:0,duration:0.5,ease:"back.out(1.6)",immediateRender:false}},{t0 + 0.05:.4f});')
+    return pid
+
+
+def presenter(c, t0, t1, cam, z=60, look=None):
     """The speaker, live and lip-synced (the hook's voice is the same source time), exactly where
     the body draws its PiP, so the cut into the body does not move the face."""
     bx, by, bw, bh = cam
     inset = 3
     crop = (bx + inset, by + inset, bw - 2 * inset, bh - 2 * inset)
-    x, y, w, h = P.pip_rect(cam)
+    x, y, w, h = P.pip_rect(cam, look)
     pid = video_card(c, t0, t1, t0, crop, x, y, w, h, z, radius=22, cls='pro-abs')
-    c.css.append(f'#{pid}{{overflow:hidden;border:3px solid rgba(255,255,255,0.9);box-shadow:0 24px 60px rgba(0,0,0,0.6)}}')
-    c.pre.append(f'gsap.set("#{pid}",{{opacity:0,scale:0.8,y:30}});')
-    c.at(f'tl.fromTo("#{pid}",{{opacity:0,scale:0.8,y:30}},{{opacity:1,scale:1,y:0,duration:0.5,ease:"back.out(1.6)",immediateRender:false}},{t0 + 0.05:.4f});')
-    return pid
+    return _style_presenter(c, pid, t0)
+
+
+def presenter_cam(c, t0, t1, cs, z=60):
+    """The speaker from the separate camera file (work/camera.json), at the body's PiP spot."""
+    x, y, w, h = cs['pip_rect']
+    pid = video_card(c, t0, t1, t0, cs['crop'], x, y, w, h, z, radius=22, cls='pro-abs',
+                     src=cs['rel'], src_size=cs['size'])
+    return _style_presenter(c, pid, t0)
 
 
 def wall(c, t0, t1, stills, z=2):
@@ -328,6 +344,7 @@ def showcase(c, vd, tl, cfg, look, th, D):
     A_end, C0 = a_len, D - c_len
     act = _activity(vd)
     cam = P.tracked_cam_box(vd)
+    cs = P.camera_source(vd, look)
     content = P.view_rect(vd, look)
     P.pro_css(c, th)
     c.css.append('.pro-shot{transform-style:preserve-3d}')
@@ -416,8 +433,10 @@ def showcase(c, vd, tl, cfg, look, th, D):
              f'duration:0.35,ease:"power3.out",immediateRender:false}},{t_in + 0.1:.4f});')
         if i < n - 1:
             c.at(f'tl.to("#{did}",{{width:{dw},background:"rgba(255,255,255,0.45)",duration:0.3,ease:"power3.out"}},{cards[i][1] + 0.1:.4f});')
-    if cam:
-        presenter(c, A_end, D, cam)
+    if cs['mode'] == 'separate':
+        presenter_cam(c, A_end, D, cs)
+    elif cam:
+        presenter(c, A_end, D, cam, look=look)
 
     # 3. end card: brand + title + agenda, then into the body's own framing
     title = str(cfg.get('title') or tl.get('hook_title') or '').strip()
@@ -481,8 +500,11 @@ def calm(c, vd, tl, cfg, look, th, D):
     gx, gy, gw, gh, rad = P.stage_geometry(look, content)
     video_card(c, 0, D, 0.0, content if rad else (0, 0, W, H), gx, gy, gw, gh, 5, radius=rad, cls='pro-abs' if rad == 0 else 'pro-shot')
     cam = P.tracked_cam_box(vd)
-    if cam:
-        presenter(c, 0, D, cam)
+    cs = P.camera_source(vd, look)
+    if cs['mode'] == 'separate':
+        presenter_cam(c, 0, D, cs)
+    elif cam:
+        presenter(c, 0, D, cam, look=look)
     t1 = min(D, 4.5)
     dim = c.uid('pdim')
     c.clip(0, t1, f'<div id="{dim}" class="pro-abs" style="inset:0;background:rgba(6,6,10,0.78);backdrop-filter:blur(14px)"></div>', 20, cls='')

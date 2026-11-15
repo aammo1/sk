@@ -99,6 +99,13 @@ def main():
 
     vd = os.path.abspath(a.video_dir)
     tl = TL.load(vd)
+    fin_path = os.path.join(vd, 'work', 'finish.json')
+    if os.path.isfile(fin_path):
+        with open(fin_path, encoding='utf-8') as f:
+            fin = json.load(f)
+        if fin and fin.get('raw_body'):
+            tl = dict(tl, _chapter_cards={'style': 'bar',
+                                          'hold': (tl.get('_chapter_cards') or {}).get('hold', TL.CHAPTER_HOLD_DEFAULT)})
     segs = TL.body_segments(tl)
     hs = float(tl['hook_split'])
     folder = a.out if os.path.isabs(a.out) else os.path.join(vd, a.out)
@@ -123,10 +130,20 @@ def main():
         clips.append(clip(nid('c'), 'T4', 'm1', 'Hook', 0.0, H))
         raw = clip(nid('c'), 'T5', 'm2', 'Hook (raw)', 0.0, H)
         clips.append(raw)
-    for i, s in enumerate(segs, 1):
+    body_i = 0
+    card_i = 0
+    for s in segs:
         d = s['out_end'] - s['out_start']
-        clips.append(clip(nid('c'), 'T4', 'm1', f'Body {i:03d}', H + s['out_start'], d, H + s['out_start']))
-        clips.append(clip(nid('c'), 'T5', 'm2', f'Raw {i:03d}', H + s['out_start'], d, s['src_start']))
+        if d <= 0:
+            continue
+        if s.get('card'):
+            card_i += 1
+            ch_num = s['index'] + 1 if 'index' in s else card_i
+            clips.append(clip(nid('c'), 'T4', 'm1', f'Chapter {ch_num:02d}', H + s['out_start'], d, H + s['out_start']))
+            continue
+        body_i += 1
+        clips.append(clip(nid('c'), 'T4', 'm1', f'Body {body_i:03d}', H + s['out_start'], d, H + s['out_start']))
+        clips.append(clip(nid('c'), 'T5', 'm2', f'Raw {body_i:03d}', H + s['out_start'], d, s['src_start']))
     import body_render
     for cs, ce, txt in body_render.caption_groups(body_render.final_words(vd, tl)):
         c = title_clip(nid('c'), 'T2', txt, cs, max(0.3, ce - cs))
@@ -195,10 +212,10 @@ def main():
 
     write_project()
 
-    n_av = len(segs) + (1 if hs > 0 else 0)
     print(f'concat-gen: {path}')
     n_caps = sum(1 for c in clips if c['trackId'] == 'T2')
-    print(f'  T4 main: {"hook + " if hs > 0 else ""}{len(segs)} body cuts, {total:.2f}s | chapters {len(chapters)} | '
+    card_note = f' + {card_i} chapter cards' if card_i else ''
+    print(f'  T4 main: {"hook + " if hs > 0 else ""}{body_i} body cuts{card_note}, {total:.2f}s | chapters {len(chapters)} | '
           f'captions {n_caps} | T5 raw cuts (hidden)'
           + (f' | inserts {len(ins_items)} (T7, hidden)' if ins_items else ''))
 

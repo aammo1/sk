@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """body_render.py — the polished tutorial body: auto zooms, styled webcam, chapter cards, captions.
 
-    body_render.py <video-dir> [--no-zoom] [--no-cam] [--captions] [--no-keys] [--plan-only]
+    body_render.py <video-dir> [--no-zoom] [--no-cam] [--captions] [--no-keys] [--plan-only] [--jobs N|auto]
 
 1. analyze(): screen activity of assets/media/cam_raw.mp4 at 5 fps (what changes where:
    typing, pointing, menus, page loads) + where the Omarchy webcam is (face tracking at 1 fps,
@@ -19,7 +19,7 @@
    -> work/body_video.mp4 (silent, exact frame count, cached) + work/body_fx_cues.txt (the
    body's own sounds: clicks, chapter whooshes, insert whooshes, callout pops).
 """
-import argparse, hashlib, json, math, os, subprocess, sys
+import argparse, hashlib, json, math, multiprocessing as mp, os, subprocess, sys
 
 try:
     import cv2
@@ -35,6 +35,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SK = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import ev2_timeline as TL  # noqa: E402
+import gpu  # noqa: E402
 
 W, H, FPS = 1920, 1080, TL.FPS
 AF = 5                      # analysis fps
@@ -51,6 +52,14 @@ def log(msg):
 
 # ------------------------------------------------------------------ webcam box
 def default_cam_box(vd):
+    cp = os.path.join(vd, 'work', 'camera.json')
+    if os.path.isfile(cp):
+        try:
+            cj = json.load(open(cp, encoding='utf-8'))
+            if isinstance(cj, dict) and cj.get('mode') == 'none':
+                return None
+        except (ValueError, OSError):
+            pass
     p = os.path.join(vd, 'work', 'omarchy.json')
     if not os.path.isfile(p):
         return None
@@ -264,14 +273,45 @@ def pause_busy(act, s, e, thr=0.002):
 
 
 # ------------------------------------------------------------------ 2. camera plan
+def _seg_frames(segs):
+    return sum(s['n'] if s.get('card') else s['f_end'] - s['f_start'] for s in segs)
+
+
+def _card_ranges(segs):
+    out = []
+    for s in segs:
+        if s.get('card'):
+            c0 = int(round(s['out_start'] * FPS))
+            out.append((c0, c0 + s['n']))
+    return out
+
+
+def _after_card(f, card_ranges):
+    for c0, c1 in card_ranges:
+        if c0 <= f < c1:
+            f = c1
+    return f
+
+
 def body_src_frames(segs):
-    return np.concatenate([np.arange(s['f_start'], s['f_end']) for s in segs]) if segs else np.zeros(0, np.int64)
+    parts, last_f = [], None
+    for s in segs:
+        if s.get('card'):
+            parts.append(np.full(s['n'], s['f_start'] if last_f is None else last_f, np.int64))
+        else:
+            arr = np.arange(s['f_start'], s['f_end'], dtype=np.int64)
+            if len(arr):
+                last_f = int(arr[-1])
+            parts.append(arr)
+    return np.concatenate(parts) if parts else np.zeros(0, np.int64)
 
 
 def src_to_body_frame(segs, t):
     """Body frame of source time t, or None when t was cut."""
     f = int(round(t * FPS))
     for s in segs:
+        if s.get('card'):
+            continue
         if s['f_start'] <= f < s['f_end']:
             return int(round(s['out_start'] * FPS)) + f - s['f_start']
     return None
@@ -281,20 +321,24 @@ def plan_camera(tl, act, max_zoom=1.6, content=(0, 0, W, H)):
     """Activity-driven zooms (used when there is no input log): zoom where the action stays in a
     small area, follow it, zoom out on page changes or quiet spells."""
     segs = TL.body_segments(tl)
-    n_out = sum(s['f_end'] - s['f_start'] for s in segs)
+    n_out = _seg_frames(segs)
     src_f = body_src_frames(segs)
     step = FPS // AF
     ticks = list(range(0, n_out, step))
+    cards = _card_ranges(segs)
+    in_card = [any(c0 <= f < c1 for c0, c1 in cards) for f in ticks]
+    active_j = [j for j, c in enumerate(in_card) if not c]
+    active_ticks = [ticks[j] for j in active_j]
     na = len(act['frac'])
-    ai = np.clip((src_f[ticks] / step).round().astype(int), 0, na - 1)
+    ai = np.clip((src_f[active_ticks] / step).round().astype(int), 0, na - 1) if active_ticks else np.zeros(0, int)
     frac, bbox = act['frac'][ai], act['bbox'][ai]
     scene = frac > 0.20
     ox, oy, cw, ch = content
     LOOK, MIN_START, QUIET_OUT, SCENE_HOLD, MIN_WIDE, MIN_HOLD, CLEAR_AHEAD = 8, 6, 30, 5, 7, 13, 13
-    targets, cur, since_scene, quiet, stable, last_change = [], None, 99, 0, 0, -99
+    active_targets, cur, since_scene, quiet, stable, last_change = [], None, 99, 0, 0, -99
 
     def window_box(j):
-        bs = [bbox[k] for k in range(j, min(len(ticks), j + LOOK)) if not scene[k] and bbox[k][0] >= 0 and frac[k] > 0.00004]
+        bs = [bbox[k] for k in range(j, min(len(active_ticks), j + LOOK)) if not scene[k] and bbox[k][0] >= 0 and frac[k] > 0.00004]
         if len(bs) < 2:
             return None
         b = np.array(bs)
@@ -312,7 +356,7 @@ def plan_camera(tl, act, max_zoom=1.6, content=(0, 0, W, H)):
         hw, hh = cw / (2 * z), ch / (2 * z)
         return b[0] >= cx - hw + 40 and b[2] <= cx + hw - 40 and b[1] >= cy - hh + 30 and b[3] <= cy + hh - 30
 
-    for j in range(len(ticks)):
+    for j in range(len(active_ticks)):
         since_scene = 0 if any(scene[j:j + 2]) else since_scene + 1
         b = window_box(j)
         z = zoom_for(b) if b is not None else None
@@ -337,8 +381,16 @@ def plan_camera(tl, act, max_zoom=1.6, content=(0, 0, W, H)):
                         cur, last_change = ((b[0] + b[2]) / 2, (b[1] + b[3]) / 2, z), j
                     elif j - last_change >= MIN_HOLD:
                         cur, last_change, stable = None, j, 0
-        targets.append(cur)
-    targets = targets[2:] + [targets[-1]] * 2 if len(targets) > 2 else targets
+        active_targets.append(cur)
+    active_targets = active_targets[2:] + [active_targets[-1]] * 2 if len(active_targets) > 2 else active_targets
+    targets, aj, hold_t = [], 0, None
+    for j in range(len(ticks)):
+        if in_card[j]:
+            targets.append(hold_t)
+        else:
+            hold_t = active_targets[aj]
+            targets.append(hold_t)
+            aj += 1
     keys, prev = [], 'none'
     for j, t in enumerate(targets):
         tt = None if t is None else (round(t[0], 1), round(t[1], 1), round(t[2], 3))
@@ -366,7 +418,8 @@ def plan_camera_inputs(tl, inp, max_zoom=1.6, content=(0, 0, W, H)):
     lands, stay while the next clicks/typing are close, pan to a near target, zoom out when
     the action moves far away or stops for a while."""
     segs = TL.body_segments(tl)
-    n_out = sum(s['f_end'] - s['f_start'] for s in segs)
+    n_out = _seg_frames(segs)
+    cards = _card_ranges(segs)
     ox, oy, cw, ch = content
     pts = []
     last_click = None
@@ -396,11 +449,14 @@ def plan_camera_inputs(tl, inp, max_zoom=1.6, content=(0, 0, W, H)):
                 g.update(b=max(g['b'], b), xs=xs, ys=ys)
                 continue
         groups.append({'a': max(0, a), 'b': b, 'xs': [x], 'ys': [y]})
+    for g in groups:
+        g['a'] = _after_card(g['a'], cards)
+        g['b'] = _after_card(g['b'], cards)
     keys, zoomed = [{'f': 0, 'cx': ox + cw / 2, 'cy': oy + ch / 2, 'z': 1.0}], 0
     for i, g in enumerate(groups):
         bw, bh = max(g['xs']) - min(g['xs']) + 420, max(g['ys']) - min(g['ys']) + 280
         z = min(max_zoom, 0.92 * min(cw / bw, ch / bh))
-        if z < 1.2:
+        if z < 1.2 or g['a'] >= n_out:
             continue
         cx, cy = (max(g['xs']) + min(g['xs'])) / 2, (max(g['ys']) + min(g['ys'])) / 2
         if keys[-1]['f'] >= g['a']:
@@ -516,6 +572,141 @@ def chapter_card(number, title, accent=(242, 3, 10)):
     return img
 
 
+def _prepare_card_bg(w, h, accent, bg=None, grain=None):
+    """BGR uint8 backdrop for full-page chapter cards (shared bg.png + optional grain.png)."""
+    if bg is None:
+        comp = os.path.join(SK, 'components')
+        if comp not in sys.path:
+            sys.path.insert(0, comp)
+        import ev2_pro as P
+        bg_bgr = P.render_bg(P.make_theme(P.rgb2hex(accent)), w, h)
+    elif isinstance(bg, str):
+        bg_bgr = cv2.imread(bg)
+    elif isinstance(bg, Image.Image):
+        bg_bgr = np.asarray(bg.convert('RGB'))[..., ::-1].copy()
+    else:
+        bg_bgr = bg[..., :3].copy()
+    if bg_bgr is None:
+        bg_bgr = np.zeros((h, w, 3), np.uint8)
+    elif bg_bgr.shape[:2] != (h, w):
+        bg_bgr = cv2.resize(bg_bgr, (w, h), interpolation=cv2.INTER_LINEAR)
+    if isinstance(grain, str):
+        grain = cv2.imread(grain, cv2.IMREAD_UNCHANGED)
+    if grain is not None and grain.ndim == 3 and grain.shape[2] >= 4:
+        gh, gw = grain.shape[:2]
+        gt = np.tile(grain, (math.ceil(h / gh), math.ceil(w / gw), 1))[:h, :w]
+        B = bg_bgr.astype(np.float32) / 255.0
+        G = gt[..., :3].astype(np.float32) / 255.0
+        ov = np.where(B < 0.5, 2.0 * B * G, 1.0 - 2.0 * (1.0 - B) * (1.0 - G))
+        ga = (gt[..., 3:4].astype(np.float32) / 255.0) * 0.55
+        bg_bgr = np.clip((B * (1.0 - ga) + ov * ga) * 255.0, 0, 255).astype(np.uint8)
+    return bg_bgr
+
+
+def _fit_mixed(text, max_w, start_sz, min_sz, step=4, max_lines=2):
+    sz = start_sz
+    while sz >= min_sz:
+        if Mixed(text, sz).width <= max_w:
+            return sz, [text]
+        sz -= step
+    sz = min_sz
+    lines, cur = [], ''
+    for wd in text.split():
+        t = (cur + ' ' + wd).strip()
+        if cur and Mixed(t, sz).width > max_w:
+            lines.append(cur)
+            cur = wd
+        else:
+            cur = t
+    if cur:
+        lines.append(cur)
+    return sz, lines[:max_lines]
+
+
+def _render_mixed_block(text, max_w, start_sz, min_sz, fill, step=4, line_gap=14):
+    if not text:
+        return None
+    sz, lines = _fit_mixed(text, max_w, start_sz, min_sz, step=step)
+    ms = [Mixed(l, sz) for l in lines if l.strip()]
+    if not ms:
+        return None
+    lh = int(round(sz * 1.35))
+    cw = int(max(m.width for m in ms)) + 40
+    ch = lh * len(ms) + line_gap * max(0, len(ms) - 1) + 40
+    im = Image.new('RGBA', (max(1, cw), max(1, ch)), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    y = 10
+    for m in ms:
+        m.draw(d, (cw - m.width) / 2, y, fill)
+        y += lh + line_gap
+    bb = im.getbbox()
+    return im.crop(bb) if bb else None
+
+
+def _chapter_page_parts(number, title, accent, size=(W, H)):
+    """Static layout pieces for a full-page chapter card: (ov_img, ox, oy, num_img, nx, ny)."""
+    w, h = size
+    sc = min(w / W, h / H)
+    ac = tuple(int(v) for v in accent) + (255,)
+    num_str = str(number)
+    f_num = font(max(12, int(round(180 * sc))), True)
+    d0 = ImageDraw.Draw(Image.new('L', (1, 1)))
+    bx0, by0, bx1, by1 = d0.textbbox((0, 0), num_str, font=f_num)
+    num_vh = max(1, by1 - by0)
+    pad_n = 8
+    num_img = Image.new('RGBA', (max(1, bx1 - bx0 + 2 * pad_n), num_vh + 2 * pad_n), (0, 0, 0, 0))
+    ImageDraw.Draw(num_img).text((pad_n - bx0, pad_n - by0), num_str, font=f_num, fill=ac)
+
+    line_w = max(20, int(round(160 * sc)))
+    line_h = max(2, int(round(6 * sc)))
+    raw = str(title or '').strip()
+    parts = [p.strip() for p in raw.split(' — ', 1)] if ' — ' in raw else [raw]
+    main_txt = parts[0] or (parts[1] if len(parts) > 1 else '')
+    sub_txt = parts[1] if len(parts) > 1 and parts[0] else ''
+    max_tw = int(w * 0.82)
+    main_img = _render_mixed_block(main_txt, max_tw, max(12, int(round(84 * sc))), max(10, int(round(44 * sc))),
+                                   (255, 255, 255, 255), step=4, line_gap=max(4, int(round(14 * sc))))
+    sub_img = _render_mixed_block(sub_txt, max_tw, max(10, int(round(48 * sc))), max(10, int(round(28 * sc))),
+                                  (255, 255, 255, 179), step=2, line_gap=max(4, int(round(10 * sc))))
+
+    gap1 = int(round(36 * sc))
+    gap2 = int(round(40 * sc))
+    gap3 = int(round(22 * sc))
+    total_h = num_vh + gap1 + line_h
+    if main_img:
+        total_h += gap2 + main_img.height
+    if sub_img:
+        total_h += gap3 + sub_img.height
+    y = (h - total_h) // 2
+    nx, ny = (w - num_img.width) // 2, y - pad_n
+    y += num_vh + gap1
+
+    ov = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    lx = (w - line_w) // 2
+    ImageDraw.Draw(ov).rounded_rectangle((lx, y, lx + line_w, y + line_h), max(1, line_h // 2), fill=ac)
+    y += line_h
+    if main_img:
+        y += gap2
+        ov.paste(main_img, ((w - main_img.width) // 2, y), main_img)
+        y += main_img.height
+    if sub_img:
+        y += gap3
+        ov.paste(sub_img, ((w - sub_img.width) // 2, y), sub_img)
+    bb = ov.getbbox() or (0, 0, 1, 1)
+    return ov.crop(bb), bb[0], bb[1], num_img, nx, ny
+
+
+def chapter_page(number, title, accent=(242, 3, 10), size=(W, H), bg=None, grain=None):
+    """Full-page chapter card (RGBA) on the shared backdrop: big number, accent line, title + subtitle."""
+    w, h = size
+    bg_bgr = _prepare_card_bg(w, h, accent, bg=bg, grain=grain)
+    page = Image.fromarray(bg_bgr[..., ::-1], 'RGB').convert('RGBA')
+    ov, ox, oy, num_img, nx, ny = _chapter_page_parts(number, title, accent, size=size)
+    page.alpha_composite(ov, (ox, oy))
+    page.alpha_composite(num_img, (nx, ny))
+    return page
+
+
 PILL_PAD = 36                # transparent margin around the pill for its shadow
 
 
@@ -621,6 +812,8 @@ def final_words(vd, tl):
                 out.append(dict(w))
             continue
         for s in segs:
+            if s.get('card'):
+                continue
             if s['src_start'] <= w['s'] < s['src_end']:
                 d = hs + s['out_start'] - s['src_start']
                 out.append({'w': w['w'], 's': w['s'] + d, 'e': min(w['e'], s['src_end']) + d})
@@ -656,14 +849,15 @@ class CamPiP:
 
     def draw(self, frame, src, box, opacity=1.0):
         bx, by, bw, bh = [int(round(v)) for v in box]
-        if bw < 20 or bh < 20 or opacity <= 0.01:
+        if src is None or bw < 20 or bh < 20 or opacity <= 0.01:
             return
         crop = src[max(0, by + 3):by + bh - 3, max(0, bx + 3):bx + bw - 3]
         if crop.size == 0:
             return
         x, y, w, h = self.rect
         blend(frame, self.sb, self.sa, x - self.pad, y - self.pad, opacity)
-        big = cv2.resize(crop, (w, h), interpolation=cv2.INTER_CUBIC)
+        interp = cv2.INTER_AREA if bw > w else cv2.INTER_CUBIC
+        big = cv2.resize(crop, (w, h), interpolation=interp)
         blend(frame, big.astype(np.float32), self.m, x, y, opacity)
 
 
@@ -879,15 +1073,340 @@ def write_fx_cues(vd, cues):
     return len(cues)
 
 
-RENDER_VERSION = 7
+RENDER_VERSION = 8
+CHUNK = 600
+_CTX = None
 
 
-def render(vd, zoom=True, cam=True, captions=False, force=False, preset='veryfast', crf=16, keys=True, preview=None):
+def resolve_jobs(jobs):
+    if jobs in (None, '', 1, '1'):
+        return 1
+    if str(jobs) == 'auto':
+        j = max(1, min(6, (os.cpu_count() or 2) - 2))
+    else:
+        j = max(1, int(jobs))
+    if gpu.enabled():
+        j = min(j, max(1, gpu.max_sessions() - 1))
+    return j
+
+
+def chunk_key(ctx, a, b, glob_parts):
+    """Per-chunk cache key (16-char sha256 hex) covering everything that affects frames [a, b)."""
+    f = lambda lst, lo, hi: [x for x in lst if lo <= x[0] < hi]
+    na = ctx['na']
+    step = FPS // AF
+    act_a = min(na - 1, int(ctx['src_list'][a]) // step) if b > a and na else 0
+    act_b = min(na - 1, int(ctx['src_list'][b - 1]) // step) + 1 if b > a and na else 0
+    parts_c = [
+        glob_parts, a, b,
+        hashlib.md5(ctx['src_list'][a:b].tobytes()).hexdigest(),
+        hashlib.md5(np.round(np.stack([ctx['cx'][a:b], ctx['cy'][a:b], ctx['z'][a:b]]), 3).tobytes()).hexdigest(),
+        f(ctx['clicks'], a - 16, b),                                    # ripples last 16 frames
+        [(f0, nn, x, y, txt) for f0, nn, x, y, txt in ctx['callouts'] if f0 < b and f0 + nn > a],
+        [(t, title) for t, title in ctx['chapters'] if t * FPS < b and t * FPS + 3.6 * FPS + 1 > a],
+        [(c[0], c[1], c[2], c[3]) for c in ctx.get('cards') or () if c[0] < b and c[1] > a],
+        [(s, e, txt) for s, e, txt in ctx['caps'] if s * FPS < b and e * FPS > a],
+        [(pl['f0'], pl['n'], pl['keys'], pl.get('label'), pl.get('pos'), py)
+         for pl, _, py, _ in ctx['pill_imgs'] if pl['f0'] < b and pl['f0'] + pl['n'] > a],
+        [(ins['name'], ins['f0'], ins['n'], ins['mode'], ins['cam'], os.path.getsize(p), int(os.path.getmtime(p)))
+         for ins, p in zip(ctx['ins_list'], ctx['ins_paths']) if ins['f0'] < b and ins['f0'] + ins['n'] > a],
+        hashlib.md5(ctx['act']['cam'][act_a:act_b].tobytes()).hexdigest(),
+    ]
+    return hashlib.sha256(json.dumps(parts_c, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+class _FrameCursor:
+    """Sequential / keyframe-seeked VideoCapture cursor keeping frame-exact parity with reading from 0."""
+    def __init__(self, path, start_src=0, preview_mode=False, allow_eof=False):
+        self.path = path
+        self.allow_eof = allow_eof
+        self.cap = cv2.VideoCapture(path)
+        self.cur = -1
+        self.frame = None
+        self.eof = False
+        self.checked_seek = True
+        self._retrieved_cur = -1
+        if start_src > 0:
+            if preview_mode:
+                p0 = max(0, start_src - 1)
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, p0)
+                self.cur = p0 - 1
+            elif os.environ.get('EV2_SAFE_SEEK') != '1':
+                k0 = (start_src // 30) * 30                       # a keyframe
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, k0)
+                self.cur = k0 - 1                                 # the loop's grab() advances from here
+                self.checked_seek = False
+
+    def _on_eof(self, needed):
+        if not self.allow_eof:
+            raise SystemExit(f'body: {os.path.basename(self.path)} ended at frame {self.cur}, needed {needed}')
+        self.eof = True
+        if self.frame is None or self._retrieved_cur != self.cur:
+            last = self._read_last_frame()
+            if last is not None:
+                self.frame = last
+
+    def _read_last_frame(self):
+        vc = cv2.VideoCapture(self.path)
+        total = int(vc.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        if total > 30:
+            vc.set(cv2.CAP_PROP_POS_FRAMES, total - 30)
+        last = None
+        while True:
+            ok, f = vc.read()
+            if not ok or f is None:
+                break
+            last = f
+        vc.release()
+        if last is None and total > 30:
+            vc = cv2.VideoCapture(self.path)
+            while True:
+                ok, f = vc.read()
+                if not ok or f is None:
+                    break
+                last = f
+            vc.release()
+        return last
+
+    def read_at(self, sf):
+        if self.eof:
+            return self.frame
+        while self.cur < sf:
+            ok = self.cap.grab()
+            if not ok:
+                self._on_eof(sf)
+                return self.frame
+            self.cur += 1
+            if self.cur == sf:
+                ok, f = self.cap.retrieve()
+                if not ok or f is None:
+                    self._on_eof(sf)
+                    return self.frame
+                self.frame = f
+                self._retrieved_cur = self.cur
+                if not self.checked_seek:
+                    self.checked_seek = True
+                    pos = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1
+                    if pos != sf:
+                        log(f'warning: seek landed on frame {pos} instead of {sf}, reopening from 0')
+                        self.cap.release()
+                        self.cap = cv2.VideoCapture(self.path)
+                        self.cur = -1
+                        while self.cur < sf:
+                            ok = self.cap.grab()
+                            if not ok:
+                                self._on_eof(sf)
+                                return self.frame
+                            self.cur += 1
+                            if self.cur == sf:
+                                ok, f = self.cap.retrieve()
+                                if not ok or f is None:
+                                    self._on_eof(sf)
+                                    return self.frame
+                                self.frame = f
+                                self._retrieved_cur = self.cur
+        return self.frame
+
+    def release(self):
+        self.cap.release()
+
+
+def _composite_card(out_f, cur_card, kk, card_bg, card_cache):
+    c0, c1, _num, _title, ov_bgr, ov_a, ox, oy, num_bgr, num_a, nx, ny = cur_card
+    nn = c1 - c0
+    if c0 not in card_cache:
+        base_bgr = card_bg.copy()
+        blend(base_bgr, ov_bgr, ov_a, ox, oy)
+        full_bgr = base_bgr.copy()
+        blend(full_bgr, num_bgr, num_a, nx, ny)
+        card_cache[c0] = (base_bgr, full_bgr)
+    base_bgr, full_bgr = card_cache[c0]
+    n_in = max(1, int(round(0.35 * FPS)))
+    n_out = max(1, int(round(0.35 * FPS)))
+    a_in = min(1.0, (kk + 1) / n_in)
+    a_out = min(1.0, (nn - kk) / n_out)
+    a = min(a_in, a_out)
+    if kk < n_in:
+        e_in = 1.0 - (1.0 - a_in) ** 3
+        scale = 1.04 - 0.04 * e_in
+        dy = int(round(30 * (1.0 - e_in)))
+        page = base_bgr.copy()
+        blend(page, num_bgr, num_a, nx, ny + dy)
+        top = _scale_about_center(page, scale)
+    else:
+        top = full_bgr
+    if a >= 0.999:
+        return top.copy()
+    return (out_f.astype(np.float32) * (1.0 - a) + top.astype(np.float32) * a).astype(np.uint8)
+
+
+def _render_range(ctx, i_from, i_to, enc_args, out_path, hash_path=None, quiet=False, preview_mode=False):
+    """Render body frames [i_from, i_to) into out_path (silent mp4). Same pixels for any split."""
+    vd = ctx['vd']
+    n = ctx['n']
+    src_list = ctx['src_list']
+    cx, cy, z = ctx['cx'], ctx['cy'], ctx['z']
+    act, na = ctx['act'], ctx['na']
+    stage, pip = ctx['stage'], ctx['pip']
+    cam2 = ctx.get('cam2')
+    clicks, co_imgs = ctx['clicks'], ctx['co_imgs']
+    ins_list, ins_paths = ctx['ins_list'], ctx['ins_paths']
+    pill_imgs, ch_imgs, cap_imgs = ctx['pill_imgs'], ctx['ch_imgs'], ctx['cap_imgs']
+    cards, card_bg = ctx.get('cards') or (), ctx.get('card_bg')
+    accent_bgr = ctx['accent_bgr']
+
+    if hash_path is None and not preview_mode and os.environ.get('EV2_FRAME_HASHES'):
+        hash_path = f"{os.environ['EV2_FRAME_HASHES']}.{i_from:07d}"
+        hash_mode = 'w'
+    else:
+        hash_mode = 'a'
+    if hash_path and os.path.dirname(hash_path):
+        os.makedirs(os.path.dirname(hash_path), exist_ok=True)
+    hash_f = open(hash_path, hash_mode) if hash_path else None
+
+    enc = subprocess.Popen(['ffmpeg', '-nostdin', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'bgr24',
+                            '-s', f'{W}x{H}', '-r', str(FPS), '-i', '-', *enc_args,
+                            '-pix_fmt', 'yuv420p', '-g', str(FPS * 2), '-r', str(FPS), out_path],
+                           stdin=subprocess.PIPE)
+    cam_path = os.path.join(vd, 'assets', 'media', 'cam_raw.mp4')
+    start_src = int(src_list[i_from]) if i_from > 0 else 0
+    cap = _FrameCursor(cam_path, start_src=start_src, preview_mode=preview_mode, allow_eof=False)
+    cap2 = _FrameCursor(cam2['path'], start_src=start_src, preview_mode=preview_mode, allow_eof=True) if cam2 else None
+
+    ii, reader, pi, ki = 0, None, 0, 0
+    ci = 0
+    card_cache = {}
+    pip_fade = max(1, int(round(0.2 * FPS)))
+    try:
+        for i in range(i_from, i_to):
+            sf_ = int(src_list[i])
+            src = cap.read_at(sf_)
+            frame2 = cap2.read_at(sf_) if cap2 is not None else None
+            box = act['cam'][min(na - 1, int(sf_ / (FPS // AF)))]
+            work = src
+            if box[0] >= 0 and (stage.inset or z[i] > 1.001 or pip is not None):
+                work = src.copy()
+                paint_out_fast(work, box)
+            v = stage.view(cx[i], cy[i], z[i])
+            out_f = stage.compose(work, v)
+            while ki < len(cards) and i >= cards[ki][1]:
+                ki += 1
+            cur_card = cards[ki] if ki < len(cards) and cards[ki][0] <= i else None
+            # clicks
+            while ci < len(clicks) and clicks[ci][0] + 16 < i:
+                ci += 1
+            if cur_card is None:
+                k = ci
+                while k < len(clicks) and clicks[k][0] <= i:
+                    f, x, y = clicks[k]
+                    if i - f < 16:
+                        sx, sy = stage.to_stage(x, y, v)
+                        draw_ripple(out_f, sx, sy, (i - f) / 16, accent_bgr, min(1.4, v[2]))
+                    k += 1
+                # callouts follow their target through the zooms
+                for f0, nn, x, y, (bgr, al) in co_imgs:
+                    if f0 <= i < f0 + nn:
+                        kk = i - f0
+                        a = min(1.0, (kk + 1) / 7, (nn - kk) / 7)
+                        sx, sy = stage.to_stage(x, y, v)
+                        pulse = 0.5 + 0.5 * math.sin(kk / FPS * 2 * math.pi * 1.2)
+                        draw_ripple(out_f, sx, sy, 0.25 + 0.35 * pulse, accent_bgr, 1.0)
+                        ph, pw = bgr.shape[:2]
+                        px = int(min(W - pw - 20, max(20, sx - pw / 2)))
+                        py = int(sy - ph - 40) if sy - ph - 40 > 20 else int(sy + 40)
+                        py += int(round(18 * (1 - min(1.0, (kk + 1) / 7)) ** 3))
+                        blend(out_f, bgr, al, px, py, a)
+            t = i / FPS
+            while ii < len(ins_list) and i >= ins_list[ii]['f0'] + ins_list[ii]['n']:
+                ii += 1
+            cur = ins_list[ii] if ii < len(ins_list) and ins_list[ii]['f0'] <= i else None
+            pip_a = 1.0
+            if cur is not None:
+                if reader is None:
+                    reader = InsertReader(ins_paths[ii], cur['n'], cur['mode'] == 'over')
+                    for _ in range(i - cur['f0']):
+                        reader.read()
+                kk = i - cur['f0']
+                a = min(1.0, (kk + 1) / 10, (cur['n'] - kk) / 10)
+                out_f = composite_insert(out_f, reader.read(), cur['mode'], a)
+                if not cur['cam']:
+                    pip_a = 1.0 - a
+                if kk == cur['n'] - 1:
+                    reader.close()
+                    reader = None
+            if cur_card is not None:
+                kk = i - cur_card[0]
+                nn = cur_card[1] - cur_card[0]
+                out_f = _composite_card(out_f, cur_card, kk, card_bg, card_cache)
+                pa = min(1.0, (kk + 1) / pip_fade, (nn - kk) / pip_fade)
+                pip_a = min(pip_a, 1.0 - pa)
+            if cam2 is not None and pip is not None:
+                pip.draw(out_f, frame2, cam2['crop'], pip_a)
+            elif pip is not None and box[0] >= 0:
+                pip.draw(out_f, src, box, pip_a)
+            while pi < len(pill_imgs) and i >= pill_imgs[pi][0]['f0'] + pill_imgs[pi][0]['n']:
+                pi += 1
+            if cur_card is None and pi < len(pill_imgs) and pill_imgs[pi][0]['f0'] <= i:
+                pl, px, py, (bgr, al) = pill_imgs[pi]
+                kk, pn = i - pl['f0'], pl['n']
+                u = min(1.0, (kk + 1) / 5)
+                a = min(u, (pn - kk) / 5)
+                blend(out_f, bgr, al, px, py + int(round(14 * (1 - u) ** 3)), a)
+            for ct, (bgr, al) in ch_imgs:
+                dt = t - ct
+                if -0.01 <= dt <= 3.6:
+                    a = min(1.0, dt / 0.35, (3.6 - dt) / 0.35)
+                    e = 1 - (1 - min(1.0, dt / 0.45)) ** 3
+                    blend(out_f, bgr, al, int(40 - 50 * (1 - e)), H - 70 - bgr.shape[0] + 40, max(0.0, a))
+            if cur_card is None:
+                for s_, e_, (bgr, al) in cap_imgs:
+                    if s_ <= t < e_:
+                        blend(out_f, bgr, al, (W - bgr.shape[1]) // 2 - 120, H - 60 - bgr.shape[0])
+            raw = out_f.tobytes()
+            if hash_f is not None:
+                hash_f.write(f'{i} {hashlib.md5(raw).hexdigest()}\n')
+            enc.stdin.write(raw)
+            if not quiet and i % (FPS * 30) == 0 and i:
+                log(f'  {i / FPS:6.0f}s / {n / FPS:.0f}s')
+    finally:
+        if reader is not None:
+            reader.close()
+        cap.release()
+        if cap2 is not None:
+            cap2.release()
+        if hash_f is not None:
+            hash_f.close()
+    enc.stdin.close()
+    if enc.wait():
+        raise SystemExit(f'body: encoding {os.path.basename(out_path)} failed')
+
+
+def _init_worker(ctx):
+    """Store shared render context in spawned worker process."""
+    global _CTX
+    _CTX = ctx
+
+
+def _worker(job):
+    a, b, path, enc_args = job
+    cv2.setNumThreads(1)
+    _render_range(_CTX, a, b, enc_args, path + '.tmp.mp4', quiet=True)
+    os.replace(path + '.tmp.mp4', path)
+    return a, b
+
+
+def render(vd, zoom=True, cam=True, captions=False, force=False, preset='veryfast', crf=16, keys=True, preview=None, jobs=1):
     """preview=(t0, t1) body seconds: render only that range to work/body_preview.mp4 (no cache)."""
+    global _CTX
     sys.path.insert(0, os.path.join(SK, 'components'))
     import ev2_pro as P
     tl = TL.load(vd)
     segs = TL.body_segments(tl)
+    if preview is not None:
+        body_dur = _seg_frames(segs) / FPS
+        if len(preview) != 2 or preview[0] < 0 or preview[0] >= body_dur or preview[1] <= preview[0]:
+            print(f'body: --preview must be within 0-{body_dur:.1f}s of the body', file=sys.stderr)
+            sys.exit(2)
     look, th = P.ensure_look(vd)
     accent_rgb = P.hex2rgb(th['accent'])
     accent_bgr = tuple(int(v) for v in accent_rgb[::-1])
@@ -905,7 +1424,7 @@ def render(vd, zoom=True, cam=True, captions=False, force=False, preset='veryfas
     inp = load_inputs(vd)
     stage = Stage(vd, look, content)
     if not zoom:
-        plan = {'n_frames': sum(s['f_end'] - s['f_start'] for s in segs), 'keys': [], 'zoomed_share': 0, 'source': 'off'}
+        plan = {'n_frames': _seg_frames(segs), 'keys': [], 'zoomed_share': 0, 'source': 'off'}
     elif inp:
         plan = plan_camera_inputs(tl, inp, look['max_zoom'], content if stage.inset else (0, 0, W, H))
     else:
@@ -914,6 +1433,8 @@ def render(vd, zoom=True, cam=True, captions=False, force=False, preset='veryfas
     json.dump(plan, open(os.path.join(vd, 'work', 'zoom_plan.json'), 'w'), indent=1)
     hs = TL.frames(tl['hook_split']) / FPS
     chapters = [(t - hs, title) for t, title in TL.final_chapters(tl, hs) if t >= hs - 1e-6]
+    card_style = (tl.get('_chapter_cards') or {}).get('style', look.get('chapter_style', 'full'))
+    card_segs = [s for s in segs if s.get('card')] if card_style == 'full' else []
     caps = []
     if captions:
         caps = [(s - hs, e - hs, txt) for s, e, txt in caption_groups(final_words(vd, tl)) if s >= hs]
@@ -926,15 +1447,26 @@ def render(vd, zoom=True, cam=True, captions=False, force=False, preset='veryfas
             if f is not None:
                 clicks.append((f, float(c['x']), float(c['y'])))
     callouts = resolve_callouts(tl, inp, act, segs)
+    cs = P.camera_source(vd, look) if cam else {'mode': 'none'}
+    cam2 = None
+    cam2_key = None
+    if cs['mode'] == 'separate':
+        cam2 = {'path': cs['path'], 'crop': cs['crop']}
+        cam2_key = ['cam2', os.path.getsize(cs['path']), int(os.path.getmtime(cs['path'])), cs['crop'], cs['pip_rect']]
     out = os.path.join(vd, 'work', 'body_video.mp4')
     stamp_p = os.path.join(vd, 'work', 'body_video.json')
     st = os.stat(os.path.join(vd, 'assets', 'media', 'cam_raw.mp4'))
-    parts = [RENDER_VERSION, TL.cut_signature(tl), plan['keys'], chapters, caps, cam, st.st_size, int(st.st_mtime),
-             look, clicks, callouts, str(act['key'])]
+    enc_args = gpu.venc(['-c:v', 'libx264', '-preset', preset, '-crf', str(crf)], crf)
+    parts = [RENDER_VERSION, TL.cut_signature(tl), tl.get('_chapter_cards'), plan['keys'], chapters, caps, cam,
+             st.st_size, int(st.st_mtime), look, clicks, callouts, str(act['key'])]
     if ins_list:
         parts.append([(ins, os.path.getsize(p), int(os.path.getmtime(p))) for ins, p in zip(ins_list, ins_paths)])
     if pills:
         parts.append(['pills', pills])
+    if enc_args[1] != 'libx264':
+        parts.append(['enc', enc_args])
+    if cam2_key is not None:
+        parts.append(cam2_key)
     key = hashlib.sha256(json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
     # the body's own sounds (always rewritten: cheap, and finish mixes them)
@@ -946,9 +1478,10 @@ def render(vd, zoom=True, cam=True, captions=False, force=False, preset='veryfas
                 cues.append((f / FPS, 'click_soft', 0.55))
                 last = f
     if look.get('chapter_sfx', True):
-        for t, _ in chapters:
-            if t > 0.5:
-                cues.append((t, 'swish', 0.6))
+        ch_times = ([s['out_start'] for s in card_segs] if card_style == 'full'
+                    else [t for t, _ in chapters if t > 0.5])
+        for t in ch_times:
+            cues.append((t, 'swish', 0.6))
     for f0, n, *_ in callouts:
         cues.append((f0 / FPS, 'click', 0.6))
     for pl in pills:
@@ -963,23 +1496,40 @@ def render(vd, zoom=True, cam=True, captions=False, force=False, preset='veryfas
     if preview is None and not force and os.path.isfile(out) and os.path.isfile(stamp_p) and json.load(open(stamp_p)).get('key') == key:
         log(f'body_video.mp4 is up to date ({plan["zoomed_share"] * 100:.0f}% zoomed)')
         return plan
-    i_from, i_to = 0, plan['n_frames']
+    n = plan['n_frames']
+    i_from, i_to = 0, n
     if preview is not None:
-        i_from = max(0, int(preview[0] * FPS))
-        i_to = min(plan['n_frames'], int(preview[1] * FPS))
+        i_from = min(n - 1, max(0, int(preview[0] * FPS))) if n else 0
+        i_to = min(n, max(i_from + 1, int(preview[1] * FPS))) if n else 0
         out = os.path.join(vd, 'work', 'body_preview.mp4')
     cx, cy, z = camera_curve(plan, content if stage.inset else (0, 0, W, H))
-    n = plan['n_frames']
     src_list = body_src_frames(segs)
     na = len(act['cam'])
     cam_ok = act['cam'][:, 0] >= 0
     med_box = tuple(np.median(act['cam'][cam_ok], axis=0)) if cam_ok.any() else None
-    pip = CamPiP(P.pip_rect(med_box)) if (cam and med_box is not None) else None
+    pip = CamPiP(P.pip_rect(med_box, look)) if (cam and cs['mode'] != 'none' and med_box is not None) else None
+    if cam2 is not None:
+        pip = CamPiP(cs['pip_rect'])
 
     hc = os.path.join(vd, 'work', 'hook_chapters.json')   # body cards continue the hook's numbering
     first = 1 + (sum(1 for x in json.load(open(hc, encoding='utf-8')) if float(x.get('time', 0)) > 0.05)
                  if os.path.isfile(hc) else 0)
-    ch_imgs = [(t, to_rgba_np(chapter_card(f'{first + i:02d}', title, accent_rgb))) for i, (t, title) in enumerate(chapters)]
+    ch_imgs = [] if card_style == 'full' else [
+        (t, to_rgba_np(chapter_card(f'{first + i:02d}', title, accent_rgb))) for i, (t, title) in enumerate(chapters)]
+    cards, card_bg = [], None
+    if card_segs:
+        bg_p = os.path.join(vd, 'assets', 'pro', 'bg.png')
+        grain_p = os.path.join(vd, 'assets', 'pro', 'grain.png')
+        card_bg = _prepare_card_bg(W, H, accent_rgb, bg=bg_p if os.path.isfile(bg_p) else None,
+                                   grain=grain_p if os.path.isfile(grain_p) else None)
+        for s in card_segs:
+            c0 = int(round(s['out_start'] * FPS))
+            c1 = c0 + s['n']
+            num_str = f'{first + s["index"]:02d}'
+            ov, ox, oy, num_img, nx, ny = _chapter_page_parts(num_str, s['title'], accent_rgb, (W, H))
+            ov_bgr, ov_a = to_rgba_np(ov)
+            num_bgr, num_a = to_rgba_np(num_img)
+            cards.append((c0, c1, num_str, s['title'], ov_bgr, ov_a, ox, oy, num_bgr, num_a, nx, ny))
     cap_imgs = [(s, e, to_rgba_np(caption_img(txt))) for s, e, txt in caps]
     pill_imgs = []
     for pl in pills:
@@ -987,114 +1537,74 @@ def render(vd, zoom=True, cam=True, captions=False, force=False, preset='veryfas
         pill_imgs.append((pl, (W - img.width) // 2, pill_y(img.height, pl['pos'], captions), to_rgba_np(img)))
     co_imgs = [(f0, nn, x, y, to_rgba_np(callout_img(txt, accent_rgb))) for f0, nn, x, y, txt in callouts]
 
-    enc = subprocess.Popen(['ffmpeg', '-nostdin', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'bgr24',
-                            '-s', f'{W}x{H}', '-r', str(FPS), '-i', '-', '-c:v', 'libx264', '-preset', preset,
-                            '-crf', str(crf), '-pix_fmt', 'yuv420p', '-g', str(FPS * 2), '-r', str(FPS), out + '.tmp.mp4'],
-                           stdin=subprocess.PIPE)
-    cap = cv2.VideoCapture(os.path.join(vd, 'assets', 'media', 'cam_raw.mp4'))
-    cur_src, frame = -1, None
-    if i_from > 0:
-        start_src = int(src_list[i_from])
-        cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, start_src - 1))
-        cur_src = max(0, start_src - 1) - 1
+    jobs = 1 if (preview is not None or n == 0) else resolve_jobs(jobs)
+    n_cards = len(cards) if card_style == 'full' else len(ch_imgs)
     log(f'rendering {i_to - i_from} of {n} frames ({n / FPS:.1f}s): {"inset stage" if stage.inset else "full frame"}, '
-        f'{plan["zoomed_share"] * 100:.0f}% zoomed ({plan.get("source")}), {len(ch_imgs)} chapter cards, '
+        f'{plan["zoomed_share"] * 100:.0f}% zoomed ({plan.get("source")}), {n_cards} chapter cards, '
         f'{len(clicks)} click ripples, {len(co_imgs)} callouts, {len(cap_imgs)} captions, webcam PiP {"on" if pip else "off"}'
-        + (f', {len(ins_list)} inserts' if ins_list else '') + (f', {len(pills)} key pills' if pills else ''))
-    ii, reader, pi = 0, None, 0
-    ci = 0
-    for i in range(i_from, i_to):
-        sf_ = int(src_list[i])
-        while cur_src < sf_:
-            ok = cap.grab()
-            if not ok:
-                raise SystemExit(f'body: cam_raw.mp4 ended at frame {cur_src}, needed {sf_}')
-            cur_src += 1
-            if cur_src == sf_:
-                ok, frame = cap.retrieve()
-        src = frame
-        box = act['cam'][min(na - 1, int(sf_ / (FPS // AF)))]
-        work = src
-        if box[0] >= 0 and (stage.inset or z[i] > 1.001 or pip is not None):
-            work = src.copy()
-            paint_out_fast(work, box)
-        v = stage.view(cx[i], cy[i], z[i])
-        out_f = stage.compose(work, v)
-        # clicks
-        while ci < len(clicks) and clicks[ci][0] + 16 < i:
-            ci += 1
-        k = ci
-        while k < len(clicks) and clicks[k][0] <= i:
-            f, x, y = clicks[k]
-            if i - f < 16:
-                sx, sy = stage.to_stage(x, y, v)
-                draw_ripple(out_f, sx, sy, (i - f) / 16, accent_bgr, min(1.4, v[2]))
-            k += 1
-        # callouts follow their target through the zooms
-        for f0, nn, x, y, (bgr, al) in co_imgs:
-            if f0 <= i < f0 + nn:
-                kk = i - f0
-                a = min(1.0, (kk + 1) / 7, (nn - kk) / 7)
-                sx, sy = stage.to_stage(x, y, v)
-                pulse = 0.5 + 0.5 * math.sin(kk / FPS * 2 * math.pi * 1.2)
-                draw_ripple(out_f, sx, sy, 0.25 + 0.35 * pulse, accent_bgr, 1.0)
-                ph, pw = bgr.shape[:2]
-                px = int(min(W - pw - 20, max(20, sx - pw / 2)))
-                py = int(sy - ph - 40) if sy - ph - 40 > 20 else int(sy + 40)
-                py += int(round(18 * (1 - min(1.0, (kk + 1) / 7)) ** 3))
-                blend(out_f, bgr, al, px, py, a)
-        t = i / FPS
-        while ii < len(ins_list) and i >= ins_list[ii]['f0'] + ins_list[ii]['n']:
-            ii += 1
-        cur = ins_list[ii] if ii < len(ins_list) and ins_list[ii]['f0'] <= i else None
-        pip_a = 1.0
-        if cur is not None:
-            if reader is None:
-                reader = InsertReader(ins_paths[ii], cur['n'], cur['mode'] == 'over')
-                for _ in range(i - cur['f0']):
-                    reader.read()
-            kk = i - cur['f0']
-            a = min(1.0, (kk + 1) / 10, (cur['n'] - kk) / 10)
-            out_f = composite_insert(out_f, reader.read(), cur['mode'], a)
-            if not cur['cam']:
-                pip_a = 1.0 - a
-            if kk == cur['n'] - 1:
-                reader.close()
-                reader = None
-        if pip is not None and box[0] >= 0:
-            pip.draw(out_f, src, box, pip_a)
-        while pi < len(pill_imgs) and i >= pill_imgs[pi][0]['f0'] + pill_imgs[pi][0]['n']:
-            pi += 1
-        if pi < len(pill_imgs) and pill_imgs[pi][0]['f0'] <= i:
-            pl, px, py, (bgr, al) = pill_imgs[pi]
-            kk, pn = i - pl['f0'], pl['n']
-            u = min(1.0, (kk + 1) / 5)
-            a = min(u, (pn - kk) / 5)
-            blend(out_f, bgr, al, px, py + int(round(14 * (1 - u) ** 3)), a)
-        for ct, (bgr, al) in ch_imgs:
-            dt = t - ct
-            if -0.01 <= dt <= 3.6:
-                a = min(1.0, dt / 0.35, (3.6 - dt) / 0.35)
-                e = 1 - (1 - min(1.0, dt / 0.45)) ** 3
-                blend(out_f, bgr, al, int(40 - 50 * (1 - e)), H - 70 - bgr.shape[0] + 40, max(0.0, a))
-        for s_, e_, (bgr, al) in cap_imgs:
-            if s_ <= t < e_:
-                blend(out_f, bgr, al, (W - bgr.shape[1]) // 2 - 120, H - 60 - bgr.shape[0])
-        enc.stdin.write(out_f.tobytes())
-        if i % (FPS * 30) == 0 and i:
-            log(f'  {i / FPS:6.0f}s / {n / FPS:.0f}s')
-    enc.stdin.close()
-    if enc.wait():
-        raise SystemExit('body: encoding body_video.mp4 failed')
+        + (f', {len(ins_list)} inserts' if ins_list else '') + (f', {len(pills)} key pills' if pills else '')
+        + (f', {jobs} jobs' if jobs > 1 else '')
+        + (', PiP from the separate camera' if cam2 else ''))
+
+    ctx = dict(vd=vd, n=n, src_list=src_list, cx=cx, cy=cy, z=z, act=act, na=na, stage=stage, pip=pip, cam2=cam2,
+               clicks=clicks, co_imgs=co_imgs, ins_list=ins_list, ins_paths=ins_paths, pill_imgs=pill_imgs,
+               ch_imgs=ch_imgs, cards=cards, card_bg=card_bg, cap_imgs=cap_imgs, accent_bgr=accent_bgr,
+               callouts=callouts, chapters=chapters, caps=caps, pills=pills)
+
+    chunk_paths = []
+    if jobs == 1:
+        _render_range(ctx, i_from, i_to, enc_args, out + '.tmp.mp4', preview_mode=(preview is not None))
+    else:
+        chunk_dir = os.path.join(vd, 'work', 'body_chunks')
+        os.makedirs(chunk_dir, exist_ok=True)
+        glob_parts = [RENDER_VERSION, CHUNK, tl.get('_chapter_cards'), look, cam, st.st_size, int(st.st_mtime),
+                      str(act['key']), stage.rect, pip.rect if pip else None, first, enc_args, accent_bgr]
+        if cam2_key is not None:
+            glob_parts.append(cam2_key)
+        chunks = [(a, min(a + CHUNK, n)) for a in range(0, n, CHUNK)]
+        todo = []
+        for idx, (a, b) in enumerate(chunks):
+            ck = chunk_key(ctx, a, b, glob_parts)
+            cp = os.path.join(chunk_dir, f'{idx:04d}-{ck}.mp4')
+            chunk_paths.append(cp)
+            if force or not os.path.isfile(cp):
+                todo.append((a, b, cp, enc_args))
+        keep = {os.path.basename(p) for p in chunk_paths}
+        for fn in os.listdir(chunk_dir):
+            if fn not in keep:
+                fp = os.path.join(chunk_dir, fn)
+                if os.path.isfile(fp):
+                    os.remove(fp)
+        if todo:
+            with mp.get_context('spawn').Pool(jobs, initializer=_init_worker, initargs=(ctx,)) as pool:
+                for k, (a, b) in enumerate(pool.imap_unordered(_worker, todo), 1):
+                    log(f'chunk {k}/{len(todo)} done ({a}-{b})')
+        log(f'{len(todo)} chunks rendered, {len(chunk_paths) - len(todo)} reused ({jobs} jobs)')
+        lst = os.path.join(chunk_dir, 'list.txt')
+        with open(lst, 'w') as f:
+            f.write(''.join(f"file '{os.path.basename(p)}'\n" for p in chunk_paths))
+        subprocess.run(['ffmpeg', '-nostdin', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', lst,
+                        '-c', 'copy', '-r', str(FPS), out + '.tmp.mp4'], check=True)
+        got = int(subprocess.check_output(
+            ['ffprobe', '-v', 'error', '-count_packets', '-select_streams', 'v:0',
+             '-show_entries', 'stream=nb_read_packets', '-of', 'csv=p=0', out + '.tmp.mp4'],
+            text=True).strip().rstrip(',') or 0)
+        if got != n:
+            raise SystemExit(f'body: joined {got} frames, expected {n} (delete work/body_chunks and retry)')
+
     os.replace(out + '.tmp.mp4', out)
     if preview is not None:
         log(f'-> {out} (preview {i_from / FPS:.1f}-{i_to / FPS:.1f}s)')
         return plan
     stamp = {'key': key, 'frames': n, 'zoomed_share': plan['zoomed_share'], 'zoom_source': plan.get('source'),
              'max_zoom': float(np.max(z)) if len(z) else 1.0, 'frame': look.get('frame'), 'clicks': len(clicks),
-             'callouts': len(co_imgs), 'inserts': [ins['name'] for ins in ins_list], 'pip': pip is not None}
+             'callouts': len(co_imgs), 'inserts': [ins['name'] for ins in ins_list], 'pip': pip is not None,
+             'pip_source': 'camera' if cam2 else ('overlay' if pip else None)}
     if pills:
         stamp['pills'] = len(pills)
+    if jobs > 1:
+        stamp['jobs'] = jobs
+        stamp['chunks'] = len(chunk_paths)
     json.dump(stamp, open(stamp_p, 'w'))
     log(f'-> work/body_video.mp4 ({n} frames)')
     return plan
@@ -1109,6 +1619,8 @@ def main():
     ap.add_argument('--no-keys', action='store_true', help='Skip the key pills from timeline.json for this run')
     ap.add_argument('--plan-only', action='store_true')
     ap.add_argument('--preview', metavar='T0,T1', help='render only body seconds T0-T1 to work/body_preview.mp4')
+    ap.add_argument('--jobs', default=os.environ.get('EV2_JOBS', '1'),
+                    help='parallel chunk workers: N or auto (default 1 = single pass)')
     ap.add_argument('--force', action='store_true')
     a = ap.parse_args()
     vd = os.path.abspath(a.video_dir)
@@ -1122,8 +1634,17 @@ def main():
         json.dump(p, open(os.path.join(vd, 'work', 'zoom_plan.json'), 'w'), indent=1)
         print(f'{len(p["keys"])} camera moves ({p["source"]}), {p["zoomed_share"] * 100:.0f}% of the body zoomed')
         return
-    pv = tuple(float(x) for x in a.preview.split(',')) if a.preview else None
-    render(vd, zoom=not a.no_zoom, cam=not a.no_cam, captions=a.captions, force=a.force, keys=not a.no_keys, preview=pv)
+    pv = None
+    if a.preview:
+        try:
+            pv = tuple(float(x) for x in a.preview.split(','))
+            if len(pv) != 2:
+                raise ValueError
+        except ValueError:
+            print('body: --preview must be T0,T1 (two numbers in body seconds)', file=sys.stderr)
+            sys.exit(2)
+    render(vd, zoom=not a.no_zoom, cam=not a.no_cam, captions=a.captions, force=a.force, keys=not a.no_keys,
+           preview=pv, jobs=a.jobs)
 
 
 if __name__ == '__main__':

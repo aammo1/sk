@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# td — tutorial-director command line. Lives in the skill; `td doctor` links it to ~/.local/bin/td.
+# Without the link, call it directly: bash <skill>/scripts/td <command> ...
+set -euo pipefail
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+SK="$(cd "$(dirname "$SELF")/.." && pwd)"
+
+VERSION="tutorial-director 0.1.0"
+
+_td_add() { case ":$PATH:" in *":$1:"*) ;; *) [ -d "$1" ] && PATH="$1:$PATH";; esac; return 0; }
+_td_add /usr/bin
+_td_add /usr/local/bin
+_td_add "$HOME/.local/bin"
+export PATH
+export PYTHONDONTWRITEBYTECODE=1
+
+export TD_HOME="${TD_HOME:-$HOME/tutorial-director}"
+TD_CACHE="${TD_CACHE:-$HOME/.cache/tutorial-director}"
+
+if [ -x "$TD_CACHE/venv/bin/python" ]; then
+  TD_PY="$TD_CACHE/venv/bin/python"
+else
+  TD_PY="$(command -v python3 2>/dev/null || echo python3)"
+fi
+export TD_PY
+
+usage() {
+  cat <<'EOF'
+Usage: td <command> [arguments...]
+
+Setup & checks:
+  doctor [--install]               Check dependencies, permissions, venvs; link td into ~/.local/bin
+  new <name>                       Create runs/<name>/ with template script.json
+  check <run>                      Validate script.json before rendering voice or recording
+
+Voice & automation:
+  voice test                       Render sample Darija sentences with golha & lahgtna to compare
+  voice render <run>               Synthesize per-step TTS audio for <run>
+  act test                         Smoke-test desktop automation (ydotool, wtype, hyprctl, grim)
+
+Pipeline:
+  dry <run>                        Dry-run <run> without screen recording (verify windows & checks)
+  record <run>                     Record screen + execute script steps for <run>
+  handoff <run>                    Build <run>/handoff/ for `ev2 init --from-director`
+  stop                             Emergency abort any active run and release held keys/buttons
+
+Other:
+  version | help
+EOF
+}
+
+run_py() {
+  local script="$1"; shift
+  if [ -f "$SK/scripts/$script" ]; then
+    exec "$TD_PY" "$SK/scripts/$script" "$@"
+  else
+    echo "td: $CMD not available yet" >&2
+    exit 1
+  fi
+}
+
+run_sh() {
+  local script="$1"; shift
+  if [ -f "$SK/scripts/$script" ]; then
+    exec bash "$SK/scripts/$script" "$@"
+  else
+    echo "td: $CMD not available yet" >&2
+    exit 1
+  fi
+}
+
+[ $# -eq 0 ] && { usage; exit 0; }
+CMD="$1"; shift
+
+case "$CMD" in
+  new|check)          run_py td_script.py "$CMD" "$@" ;;
+  doctor)             run_sh doctor.sh "$@" ;;
+  voice)              run_py td_voice.py "$@" ;;
+  act|stop)           run_py td_act.py "$CMD" "$@" ;;
+  dry|record|handoff) run_py td_run.py "$CMD" "$@" ;;
+  version|--version|-v) echo "$VERSION ($SK)" ;;
+  help|--help|-h)       usage ;;
+  *) echo "td: unknown command '$CMD' (td help)" >&2; exit 2 ;;
+esac

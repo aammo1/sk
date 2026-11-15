@@ -29,7 +29,7 @@ Outputs:
 Usage:
   clean-retakes.py <video-dir> [--hook-split 45] [--max-silence 0.6] [--keep 0.3] [--pad 0.08] [--retakes]
 """
-import argparse, json, os, re, subprocess, sys
+import argparse, copy, json, os, re, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ev2_timeline as TL  # noqa: E402
@@ -119,6 +119,113 @@ def phrases_of(words):
         res.append({'start': ws[0]['s'], 'end': ws[-1]['e'], 'text': ' '.join(x['w'] for x in ws),
                     'norm': [n for n in (normalize_darija(x['w']) for x in ws) if n]})
     return res
+
+
+def _filter_post_split(items, hs):
+    """Return (kept, dropped_count) for plan items with numeric src_t >= hs."""
+    kept, dropped = [], 0
+    for it in items:
+        st = it.get('src_t') if isinstance(it, dict) else None
+        if isinstance(st, (int, float)) and not isinstance(st, bool) and st >= hs - 1e-6:
+            kept.append(it)
+        else:
+            dropped += 1
+    return kept, dropped
+
+
+def _apply_director_metadata(vd, tl, hs):
+    """Mark director projects and merge work/director-plan.json suggestions into empty/unmodified slots."""
+    work = os.path.join(vd, 'work')
+    kit_path = os.path.join(vd, 'kit.json')
+    style = 'documentary'
+    kit_director = False
+    if os.path.isfile(kit_path):
+        try:
+            kit = json.load(open(kit_path, encoding='utf-8'))
+            style = kit.get('style', 'documentary')
+            kit_director = bool(kit.get('director'))
+        except (ValueError, OSError):
+            pass
+    dp_path = os.path.join(work, 'director-plan.json')
+    has_dir_meta = (bool(tl.get('director')) or kit_director
+                    or os.path.isfile(os.path.join(work, 'director.json'))
+                    or os.path.isfile(dp_path))
+    if has_dir_meta:
+        tl['director'] = True
+    if not os.path.isfile(dp_path):
+        return False
+    try:
+        plan = json.load(open(dp_path, encoding='utf-8'))
+    except (ValueError, OSError) as e:
+        print(f'clean-retakes: WARNING could not read {dp_path}: {e}', file=sys.stderr)
+        return False
+    if not isinstance(plan, dict):
+        return False
+
+    applied_path = os.path.join(work, 'director-plan-applied.json')
+    prev_applied = {}
+    if os.path.isfile(applied_path):
+        try:
+            loaded_applied = json.load(open(applied_path, encoding='utf-8'))
+            if isinstance(loaded_applied, dict):
+                prev_applied = loaded_applied
+        except (ValueError, OSError):
+            prev_applied = {}
+    new_applied = copy.deepcopy(prev_applied)
+
+    for key in ('chapters', 'inserts', 'callouts', 'keys'):
+        items = plan.get(key)
+        if not isinstance(items, list) or not items:
+            continue
+        cur = tl.get(key) or []
+        # Re-sync when empty (never auto-imported) or unchanged since last auto-import; preserve manual edits.
+        can_sync = (cur == prev_applied[key]) if key in prev_applied else (not cur)
+        if not can_sync:
+            continue
+        kept, dropped = _filter_post_split(items, hs)
+        if dropped:
+            print(f'clean-retakes: skipped {dropped} suggested {key} item(s) before hook_split ({hs:.2f}s)',
+                  file=sys.stderr)
+        if kept:
+            tl[key] = copy.deepcopy(kept)
+        elif key == 'chapters':
+            tl[key] = []
+        else:
+            tl.pop(key, None)
+        new_applied[key] = copy.deepcopy(kept)
+
+    if new_applied != prev_applied:
+        tmp = applied_path + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(new_applied, f, indent=2, ensure_ascii=False)
+            f.write('\n')
+        os.replace(tmp, applied_path)
+
+    if plan.get('title') and (not tl.get('hook_title') or tl.get('hook_title') == 'Intro'):
+        tl['hook_title'] = str(plan['title'])
+
+    hook_path = os.path.join(work, 'hook.json')
+    hk = None
+    if os.path.isfile(hook_path):
+        try:
+            hk = json.load(open(hook_path, encoding='utf-8'))
+        except (ValueError, OSError):
+            hk = None
+    if hk is None and (plan.get('promise') or plan.get('title')):
+        hk = {'recipe': 'calm' if style == 'calm' else 'showcase', 'promise': ''}
+    if isinstance(hk, dict):
+        changed = not os.path.isfile(hook_path)
+        if not hk.get('promise') and plan.get('promise'):
+            hk['promise'] = str(plan['promise'])
+            changed = True
+        if not hk.get('title') and plan.get('title'):
+            hk['title'] = str(plan['title'])
+            changed = True
+        if changed:
+            with open(hook_path, 'w', encoding='utf-8') as f:
+                json.dump(hk, f, indent=2, ensure_ascii=False)
+                f.write('\n')
+    return True
 
 
 def main():
@@ -314,6 +421,7 @@ def main():
                'source_duration': round(duration, 3), 'hook_split': hs, 'segments': segments})
     tl.setdefault('chapters', [])
     tl.setdefault('hook_title', 'Intro')
+    director_loaded = _apply_director_metadata(vd, tl, hs)
     TL.save(vd, tl)
 
     body = TL.body_duration(tl)
@@ -355,6 +463,8 @@ def main():
     print(f"clean-retakes: hook 0-{hs:.2f}s | body {duration - hs:.1f}s -> {body:.1f}s "
           f"({len(sil_report)} pauses shortened, {n_busy} busy-screen, {n_on}/{len(cands)} retakes cut) | final ≈ {fmt_time(final)}")
     print(f"  -> {TL.tl_path(vd)}\n  -> {cuts_path}\n  -> {os.path.join(work, 'cuts-report.md')}")
+    if director_loaded:
+        print('plan suggestions from tutorial-director loaded: approve at the PLAN gate')
 
 
 if __name__ == '__main__':

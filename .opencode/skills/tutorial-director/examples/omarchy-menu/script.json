@@ -1,0 +1,213 @@
+{
+  "title": "Omarchy menu f 3 dqayq",
+  "promise": "بدل الثيم وحل *Omarchy menu* فثواني",
+  "lang": "darija",
+  "voice": {
+    "engine": "golha",
+    "ref": null,
+    "speed": 1.0
+  },
+  "screen": {
+    "monitor": "auto",
+    "workspace": 9
+  },
+  "studio": {
+    "font_px": 18,
+    "browser_zoom": 1.25,
+    "wallpaper": "plain",
+    "hide_bar": true,
+    "cursor_px": 32
+  },
+  "pace": {
+    "cps": 10,
+    "settle_after": 1.0,
+    "pre_click": 0.25
+  },
+  "layout": {
+    "terminal": [160, 90, 1600, 900]
+  },
+  "setup": [],
+  "steps": [
+    {
+      "id": "s01",
+      "chapter": "Menu — قائمة Omarchy",
+      "say": "اليوم غادي نشوفو كيفاش نبدلو الثيم من Omarchy menu.",
+      "actions": [
+        {
+          "do": "wait",
+          "s": 0.5
+        }
+      ]
+    },
+    {
+      "id": "s02",
+      "say": "ضغط على Super و Alt و Space باش تحل المينيو.",
+      "actions": [
+        {
+          "do": "key",
+          "combo": "super+alt+space"
+        },
+        {
+          "do": "wait",
+          "s": 0.6
+        },
+        {
+          "do": "check",
+          "expect": "Omarchy menu is open"
+        }
+      ],
+      "callout": {
+        "text": "Omarchy menu",
+        "at_action": 0,
+        "dur": 3
+      }
+    },
+    {
+      "id": "s03",
+      "say": "كنكتبو theme وكنضغطو Enter باش نشوفو الثيمات.",
+      "actions": [
+        {
+          "do": "type",
+          "text": "theme",
+          "cps": 10
+        },
+        {
+          "do": "wait",
+          "s": 0.4
+        },
+        {
+          "do": "key",
+          "combo": "Return"
+        },
+        {
+          "do": "wait",
+          "s": 0.5
+        },
+        {
+          "do": "check",
+          "expect": "Theme picker is open"
+        }
+      ],
+      "insert": {
+        "recipe": "steps",
+        "dur": 12,
+        "data": {
+          "title": "تبديل الثيم فـ *Omarchy*",
+          "steps": [
+            {
+              "label": "Super + Alt + Space",
+              "sub": "فتح Omarchy menu"
+            },
+            {
+              "label": "كتب theme",
+              "sub": "البحث على الثيمات"
+            },
+            {
+              "label": "اختار و Enter",
+              "sub": "تطبيق الثيم مباشرة"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "s04",
+      "say": "تقدر تقلب بالأسهم وتضغط Escape باش تسد المينيو.",
+      "actions": [
+        {
+          "do": "key",
+          "combo": "Down"
+        },
+        {
+          "do": "wait",
+          "s": 0.4
+        },
+        {
+          "do": "key",
+          "combo": "Escape"
+        },
+        {
+          "do": "wait",
+          "s": 0.4
+        },
+        {
+          "do": "key",
+          "combo": "Escape"
+        }
+      ]
+    },
+    {
+      "id": "s05",
+      "chapter": "Terminal — التيرمينال",
+      "say": "دابا غادي نحلو التيرمينال بـ Super و Enter.",
+      "actions": [
+        {
+          "do": "key",
+          "combo": "super+Return"
+        },
+        {
+          "do": "wait_for",
+          "window": "class:ghostty|Alacritty|kitty|foot",
+          "timeout": 6
+        },
+        {
+          "do": "move_window",
+          "window": "class:ghostty|Alacritty|kitty|foot",
+          "to": [160, 90, 1600, 900]
+        }
+      ]
+    },
+    {
+      "id": "s06",
+      "layout": {
+        "window": "class:ghostty|Alacritty|kitty|foot",
+        "slot": "terminal"
+      },
+      "say": "نكتبو fastfetch باش نشوفو تفاصيل النظام.",
+      "actions": [
+        {
+          "do": "type",
+          "text": "fastfetch",
+          "cps": 10
+        },
+        {
+          "do": "key",
+          "combo": "Return"
+        },
+        {
+          "do": "wait",
+          "s": 0.8
+        },
+        {
+          "do": "check",
+          "expect": "fastfetch output is visible"
+        }
+      ]
+    },
+    {
+      "id": "s07-recap",
+      "say": "ملخص: المينيو بـ Super Alt Space والتيرمينال بـ Super Enter.",
+      "actions": [
+        {
+          "do": "type",
+          "text": "exit",
+          "cps": 12
+        },
+        {
+          "do": "key",
+          "combo": "Return"
+        },
+        {
+          "do": "wait",
+          "s": 0.4
+        }
+      ]
+    }
+  ],
+  "cleanup": [
+    {
+      "do": "key",
+      "combo": "Escape"
+    }
+  ]
+}

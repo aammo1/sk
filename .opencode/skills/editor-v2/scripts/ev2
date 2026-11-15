@@ -7,7 +7,7 @@ SELF="$(readlink -f "${BASH_SOURCE[0]}")"
 SK="$(cd "$(dirname "$SELF")/.." && pwd)"
 source "$SK/scripts/env.sh"
 
-VERSION="editor-v2 3.0.0"
+VERSION="editor-v2 3.1.0"
 
 usage() {
   cat <<'EOF'
@@ -15,15 +15,19 @@ Usage: ev2 <command> [arguments...]
 
 Before you record (once):
   rec install                      Log cursor/clicks/shortcuts while Omarchy records (exact zooms + ripples)
-  rec status | rec test [S] | rec uninstall
+  rec status | rec test [S] | rec uninstall | rec cam on|off|status|test
 
 Pipeline (in order):
   doctor [--install-speech]        Check/install everything; links ev2 into ~/.local/bin
-  init <file|--latest> [name] [--style calm]
+  init <file|--latest> [name] [--style calm] [--cam FILE [--cam-offset S] [--voice screen|cam]] [--no-cam]
                                    New video dir from a recording (cam_raw.mp4, vo.wav, omarchy.json, inputs.json)
+  init --from-director <handoff> [name] [--dir parent] [--style calm|documentary]
+                                   New video dir from a tutorial-director handoff (no ASR, no webcam)
   transcribe <dir> [--model M] [--windowed] [--force]
                                    Whisper words -> snap onsets -> clean (writes work/timeline.json);
                                    --force replaces a hand-corrected words.json (backup kept)
+  draft <dir> [--retakes]          Fast 720p rough cut (source times, retakes, chapters labelled)
+                                   -> out/draft.mp4; allowed before the PLAN gate
   clean <dir> [--hook-split S] [--retakes]
                                    Re-run silence/retake cutting after editing cuts.json
   check <dir>                      Validate timeline.json / hook.json / look.json before rendering
@@ -31,7 +35,7 @@ Pipeline (in order):
                                    The designed hook from work/hook.json (--init: auto-pick the shots)
   inserts <dir> [--final] [--only NAME] [--force]
                                    Explainer inserts from recipes (or inserts.py scenes) -> work/inserts/
-  finish <dir> [--editor concat|kdenlive|both|none] [--no-keys]
+  finish <dir> [--editor concat|kdenlive|both|none] [--no-keys] [--jobs N|auto]
                                    final.mp4 + hook.mp4 + editor project + Short + chapters, then verify
   verify <dir>                     Definition of done + beauty check -> out/verify.md (exit 1 = not done)
 
@@ -53,7 +57,7 @@ Optional extras (off unless you ask):
 Tools:
   concat <dir>                     (Re)generate the Concat project out/concat/concat.json
   kdenlive <dir>                   (Re)generate out/project.kdenlive
-  body <dir> [--plan-only] [--preview T0,T1]
+  body <dir> [--plan-only] [--preview T0,T1] [--jobs N|auto]
                                    Plan zooms, render the polished body, or preview a few seconds of it
   short <in.mp4> <out.mp4> [...]   9:16 Short from a 16:9 video
   convert-model <hf-repo-id>      Make a Hugging Face Whisper fine-tune (e.g. Darija) usable by transcribe
@@ -80,6 +84,7 @@ case "$CMD" in
     "$EV2_PY" "$SK/scripts/snap-onsets.py" "$VD"
     "$EV2_PY" "$SK/scripts/clean-retakes.py" "$VD"
     ;;
+  draft)      need_dir "$@"; exec "$EV2_PY" "$SK/scripts/draft.py" "$@" ;;
   clean)      need_dir "$@"; exec "$EV2_PY" "$SK/scripts/clean-retakes.py" "$@" ;;
   build|hook)
     need_dir "$@"; VD="$1"; shift

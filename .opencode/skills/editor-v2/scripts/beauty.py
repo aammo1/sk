@@ -12,8 +12,9 @@ Checks (FAIL = fix before publishing, WARN = worth a look):
          length        longer than 32 s                                                   WARN
          sound         fewer than 4 sound effects                                         WARN
   inserts frozen       no visual change for > 4 s (> 2.5 s: WARN)                         FAIL/WARN
+         hold         finished card shown < 2.5 s before exit                             WARN
   body   zoom          zoomed past 2.0x (past 1.8x: WARN): text gets soft                 FAIL/WARN
-         stage         not inset, or no webcam PiP when there is a webcam                 WARN
+         stage         not inset, or no webcam PiP when there is a webcam (overlay or separate camera)  WARN
          monotony      > 50 s of body with no zoom, insert, callout or chapter card       WARN (with where)
          music         no music under the body                                            WARN
   text   description   internal notes/paths left in out/youtube-description.md            FAIL
@@ -36,6 +37,8 @@ except ImportError:
 HERE = os.path.dirname(os.path.abspath(__file__))
 SK = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(SK, 'components'))
+import ev2_recipes as REC  # noqa: E402
 import ev2_timeline as TL  # noqa: E402
 
 FPS = 30
@@ -135,9 +138,52 @@ def check_hook(vd, tl):
     add('WARN' if n < 4 else 'PASS', 'hook: sound', f'{n} sound effects')
 
 
+def _insert_hold_target(vd):
+    lp = os.path.join(vd, 'work', 'look.json')
+    if os.path.isfile(lp):
+        try:
+            v = json.load(open(lp, encoding='utf-8')).get('insert_hold')
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                return float(v)
+        except (OSError, ValueError):
+            pass
+    return REC.HOLD_DEFAULT
+
+
+def _insert_actual_hold(vd, ins, raw, target_hold):
+    st_path = os.path.join(vd, 'work', 'inserts', f'{ins["name"]}.json')
+    if os.path.isfile(st_path):
+        try:
+            st = json.load(open(st_path, encoding='utf-8'))
+            if isinstance(st, dict):
+                dur = float(st.get('dur', ins['dur']))
+                lr = st.get('last_reveal')
+                if isinstance(lr, (int, float)) and not isinstance(lr, bool):
+                    return max(0.0, dur - REC.EXIT_PAD - float(lr))
+                revs = st.get('reveals') if isinstance(st.get('reveals'), list) else st.get('reveal_times')
+                nums = [float(x) for x in (revs or []) if isinstance(x, (int, float)) and not isinstance(x, bool)]
+                if nums:
+                    return max(0.0, dur - REC.EXIT_PAD - max(nums))
+        except (OSError, ValueError):
+            pass
+    if raw and raw.get('recipe') in REC.RECIPES:
+        need = REC.min_dur(raw['recipe'], raw.get('data') or {}, target_hold)
+        return max(0.0, ins['dur'] - (need - target_hold))
+    return None
+
+
 def check_inserts(vd, tl):
     bad, ok = [], 0
+    hold_bad, hold_ok = [], 0
+    target_hold = _insert_hold_target(vd)
+    raw_map = {e['name']: e for e in (tl.get('inserts') or []) if isinstance(e, dict) and 'name' in e}
     for ins in TL.insert_ranges(tl):
+        actual_hold = _insert_actual_hold(vd, ins, raw_map.get(ins['name']), target_hold)
+        if actual_hold is not None:
+            if actual_hold < 2.5:
+                hold_bad.append(f'"{ins["name"]}" finished card shown only {actual_hold:.1f}s')
+            else:
+                hold_ok += 1
         p = TL.insert_render_path(vd, ins)
         if not os.path.isfile(p):
             continue
@@ -154,6 +200,10 @@ def check_inserts(vd, tl):
         add('FAIL' if any(b[0] == 'FAIL' for b in bad) else 'WARN', 'inserts: motion', '; '.join(b[1] for b in bad))
     elif ok:
         add('PASS', 'inserts: motion', f'{ok} inserts keep moving')
+    if hold_bad:
+        add('WARN', 'inserts: hold', '; '.join(hold_bad))
+    elif hold_ok:
+        add('PASS', 'inserts: hold', f'{hold_ok} inserts hold >= 2.5s')
 
 
 def check_body(vd, tl):
@@ -167,15 +217,27 @@ def check_body(vd, tl):
         add(lvl, 'body: zoom', f'max {mz:.2f}x ({st.get("zoom_source", "?")}-driven, {st.get("zoomed_share", 0) * 100:.0f}% of the body zoomed)')
     om = os.path.join(vd, 'work', 'omarchy.json')
     has_cam = os.path.isfile(om) and json.load(open(om)).get('has_webcam_overlay')
+    cj = os.path.join(vd, 'work', 'camera.json')
+    cam_mode = None
+    if os.path.isfile(cj):
+        try:
+            cam_mode = json.load(open(cj, encoding='utf-8')).get('mode')
+        except (ValueError, OSError):
+            cam_mode = None
+    if cam_mode == 'none':
+        has_cam = False
+    elif not has_cam and cam_mode == 'separate':
+        has_cam = True
     probs = []
     if st.get('frame', 'full') != 'inset':
         probs.append('the screen is edge to edge (look.frame "inset" looks more finished)')
     if has_cam and st.get('pip') is False:
         probs.append('there is a webcam but no PiP')
-    add('WARN' if probs else 'PASS', 'body: stage', '; '.join(probs) if probs else 'inset screen on the backdrop, speaker PiP')
+    pip_note = 'no PiP' if (cam_mode == 'none' or not has_cam and st.get('pip') is False) else 'speaker PiP'
+    add('WARN' if probs else 'PASS', 'body: stage', '; '.join(probs) if probs else f'inset screen on the backdrop, {pip_note}')
     # monotony: long stretches where nothing new happens on top of the screen
     segs = TL.body_segments(tl)
-    n = sum(s['f_end'] - s['f_start'] for s in segs)
+    n = sum(s['n'] if s.get('card') else s['f_end'] - s['f_start'] for s in segs)
     if n <= 0:
         return
     busy = np.zeros(n, bool)
@@ -185,6 +247,9 @@ def check_body(vd, tl):
             busy[max(0, k['f'] - 15):k['f'] + 45] = True
     for ins in TL.insert_ranges(tl):
         busy[ins['f0']:ins['f0'] + ins['n']] = True
+    for c in TL.card_segments(tl):
+        c0 = TL.frames(c['out_start'])
+        busy[c0:c0 + c['n']] = True
     hs = TL.frames(tl['hook_split']) / FPS
     for t, _ in TL.final_chapters(tl, hs):
         f = int((t - hs) * FPS)
@@ -197,7 +262,11 @@ def check_body(vd, tl):
     act = os.path.join(vd, 'work', 'activity.npz')
     if os.path.isfile(act):
         frac = np.load(act)['frac']
-        src = np.concatenate([np.arange(s['f_start'], s['f_end']) for s in segs])
+        src = np.concatenate([
+            np.full(s['n'], s['f_start'], dtype=np.int64) if s.get('card')
+            else np.arange(s['f_start'], s['f_end'], dtype=np.int64)
+            for s in segs
+        ])
         scene = frac[np.clip(src // 6, 0, len(frac) - 1)] > 0.2      # page changes count as something new
         busy |= scene
     quiet, at = runs(~busy, FPS)
@@ -229,7 +298,9 @@ def check_text(vd, tl):
         e = json.load(open(eng)) if os.path.isfile(eng) else {}
         mp, low = e.get('mean_prob'), e.get('low_prob_share')
         edited = TL.words_edited(vd)
-        if edited is True:
+        if e.get('source') == 'script' or e.get('engine') == 'director-script':
+            add('PASS', 'text: captions', 'transcript from tutorial-director script')
+        elif edited is True:
             add('PASS', 'text: captions', 'transcript corrected by hand')
         elif mp is None:
             add('WARN', 'text: captions', 'captions are raw speech recognition (confidence unknown): read them before uploading')

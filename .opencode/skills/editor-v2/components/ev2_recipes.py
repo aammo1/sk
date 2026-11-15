@@ -28,6 +28,11 @@ RTL = ' dir="rtl"'
 RECIPES = ('flow', 'steps', 'checklist', 'compare', 'stat', 'statement', 'screens')
 LIMITS = {'flow': (2, 6), 'steps': (2, 6), 'checklist': (2, 8)}
 
+HOLD_DEFAULT = 4.0
+EXIT_PAD = 0.75
+ENTER_PAD = 0.6
+STEP_MIN = 1.2
+
 
 # ------------------------------------------------------------------ data helpers
 def _item(x):
@@ -99,10 +104,41 @@ def validate(entry):
     return out
 
 
-def schedule(n, dur, start=0.55, frac=0.55, ats=None, said=None):
+def ceil2(x):
+    """Round x up to the nearest 0.5 s."""
+    return math.ceil(x * 2 - 1e-9) / 2
+
+
+def count_items(recipe, data):
+    """Number of sequential reveal elements in a recipe's data."""
+    d = data or {}
+    if recipe in ('flow', 'steps'):
+        return len(items_of(d, 'steps'))
+    if recipe == 'checklist':
+        return len(items_of(d, 'items'))
+    if recipe == 'compare':
+        L, R = d.get('left') or {}, d.get('right') or {}
+        return len(items_of(L, 'items')) + len(items_of(R, 'items')) + 2
+    if recipe == 'screens':
+        return len((d.get('shots') or [])[:3])
+    return 1
+
+
+def min_dur(recipe, data, hold=HOLD_DEFAULT):
+    """Shortest dur (s, rounded up to 0.5) that shows every element and keeps `hold` s at the end."""
+    n = count_items(recipe, data)
+    return ceil2(ENTER_PAD + 0.55 + STEP_MIN * max(0, n - 1) + hold + EXIT_PAD)
+
+
+def schedule(n, dur, start=0.55, frac=0.55, ats=None, said=None, hold=HOLD_DEFAULT):
     """Reveal times for n elements: explicit 'at' wins, else when the label is said, else spread
-    evenly from `start` to `frac` of the insert. Always increasing, >= 0.25 s apart."""
-    end = max(start + 0.3 * (n - 1), dur * frac)
+    evenly from `start` to `min(dur * frac, dur - EXIT_PAD - hold)`. Always increasing, >= 0.25 s apart."""
+    if n <= 0:
+        return []
+    last_ok = dur - EXIT_PAD - hold
+    min_end = max(start, 0.2) + 0.25 * (n - 1)
+    end = max(start + 0.25 * (n - 1), min(dur * frac, last_ok))
+    cap = max(last_ok, min_end)
     even = [start + (end - start) * k / max(1, n - 1) for k in range(n)] if n > 1 else [start]
     out, prev = [], -1.0
     for k in range(n):
@@ -112,8 +148,9 @@ def schedule(n, dur, start=0.55, frac=0.55, ats=None, said=None):
         elif said and said[k] is not None and abs(said[k] - even[k]) < dur * 0.35:
             t = said[k] - 0.15
         t = even[k] if t is None else t
+        hi = cap - 0.25 * (n - 1 - k)
+        t = min(t, hi)
         t = max(t, prev + 0.25, 0.2)
-        t = min(t, dur - 1.2)
         out.append(t)
         prev = t
     return out
@@ -143,9 +180,18 @@ def said_times(labels, words):
 # ------------------------------------------------------------------ shared scaffold
 class Ctx:
     """What a recipe needs besides its data: theme, backdrop paths, the words said during the
-    insert (local times) and a still() extractor for screenshots from the recording."""
-    def __init__(self, theme, bg='assets/pro/bg.png', grain='assets/pro/grain.png', words=None, vd='.'):
+    insert (local times), hold duration and a still() extractor for screenshots from the recording."""
+    def __init__(self, theme, bg='assets/pro/bg.png', grain='assets/pro/grain.png', words=None, vd='.', hold=None):
         self.th, self.bg, self.grain, self.words, self.vd = theme, bg, grain, words or [], vd
+        if hold is None:
+            lp = os.path.join(vd, 'work', 'look.json') if isinstance(vd, (str, bytes, os.PathLike)) and vd else None
+            if lp and os.path.isfile(lp):
+                try:
+                    with open(lp, encoding='utf-8') as f:
+                        hold = json.load(f).get('insert_hold')
+                except ValueError as e:
+                    raise SystemExit(f'work/look.json is not valid JSON: {e}')
+        self.hold = float(HOLD_DEFAULT if hold is None else hold)
 
     def still(self, src_t):
         """A frame of the recording with the burned-in webcam painted out (a face from another
@@ -204,7 +250,7 @@ def r_flow(c, ins, d, ctx):
     lab_w = int(min(420, abs(gap) - 30))
     R = 74 if n <= 4 else 64
     labels = [s['label'] for s in steps]
-    times = schedule(n, dur, 0.6, 0.5, [s.get('at') for s in steps], said_times(labels, ctx.words))
+    times = schedule(n, dur, 0.6, 0.5, [s.get('at') for s in steps], said_times(labels, ctx.words), hold=ctx.hold)
     lab_size = min(P.fit_text(l, lab_w, (40, 36, 32, 30, 28, 26, 24), 700, 2)[0] for l in labels)
 
     # connectors (SVG), drawn when the next node lands
@@ -292,7 +338,7 @@ def r_steps(c, ins, d, ctx):
     top, _ = scaffold(c, dur, ctx, d.get('title', ''), d.get('kicker', ''))
     rtl = sum(P.has_ar(s['label']) for s in steps) > n / 2
     labels = [s['label'] for s in steps]
-    times = schedule(n, dur, 0.55, 0.6, [s.get('at') for s in steps], said_times(labels, ctx.words))
+    times = schedule(n, dur, 0.55, 0.6, [s.get('at') for s in steps], said_times(labels, ctx.words), hold=ctx.hold)
     avail = 1000 - top
     row_h = min(150, avail / n)
     list_w, panel = 980, 620
@@ -357,7 +403,7 @@ def r_checklist(c, ins, d, ctx):
     n = len(items)
     top, _ = scaffold(c, dur, ctx, d.get('title', ''), d.get('kicker', ''))
     labels = [s['label'] for s in items]
-    times = schedule(n, dur, 0.55, 0.6, [s.get('at') for s in items], said_times(labels, ctx.words))
+    times = schedule(n, dur, 0.55, 0.6, [s.get('at') for s in items], said_times(labels, ctx.words), hold=ctx.hold)
     cols = 2 if n > 4 else 1
     per = math.ceil(n / cols)
     col_w = 760 if cols == 2 else 1100
@@ -401,7 +447,7 @@ def r_compare(c, ins, d, ctx):
     L, R = d['left'], d['right']
     li, ri = [_item(x) for x in L['items']], [_item(x) for x in R['items']]
     n = len(li) + len(ri)
-    times = schedule(n + 2, dur, 0.5, 0.62)
+    times = schedule(n + 2, dur, 0.5, 0.62, hold=ctx.hold)
     pw, gap = 780, 120
     x0 = (1920 - 2 * pw - gap) / 2
     avail = 1000 - top
@@ -567,7 +613,7 @@ def r_screens(c, ins, d, ctx):
     y = top + (avail - sh - 80) / 2
     rot = {1: [0], 2: [7, -7], 3: [10, 0, -10]}[k]
     parts, ids = [], []
-    times = schedule(k, dur, 0.5, 0.45)
+    times = schedule(k, dur, 0.5, 0.45, hold=ctx.hold)
     for i, s in enumerate(shots):
         sid, lid = c.uid('pss'), c.uid('psl')
         ids.append((sid, lid))
