@@ -32,7 +32,7 @@ if [ $# -eq 0 ]; then
   exit 1
 fi
 
-PARENT="$HOME/editor-v2/videos"; STYLE="documentary"
+PARENT="$HOME/editor-v2/videos"; STYLE="documentary"; MODE="tutorial"
 CAM=""; CAM_OFFSET=""; VOICE="screen"; NO_CAM=0; DIRECTOR_DIR=""
 POSITIONAL=()
 while [ $# -gt 0 ]; do
@@ -42,6 +42,8 @@ while [ $# -gt 0 ]; do
     --dir) [ $# -ge 2 ] || { echo "new-video: error: --dir requires a path" >&2; exit 1; }; PARENT="$2"; shift 2;;
     --style) STYLE="${2:-}"; shift $(( $# > 1 ? 2 : 1 ));;
     --style=*) STYLE="${1#--style=}"; shift;;
+    --mode) MODE="${2:-}"; shift $(( $# > 1 ? 2 : 1 ));;
+    --mode=*) MODE="${1#--mode=}"; shift;;
     --cam) [ $# -ge 2 ] && [ -n "$2" ] || { echo "new-video: error: --cam requires a file" >&2; exit 1; }; CAM="$2"; shift 2;;
     --cam=*) CAM="${1#--cam=}"; [ -n "$CAM" ] || { echo "new-video: error: --cam requires a file" >&2; exit 1; }; shift;;
     --cam-offset) [ $# -ge 2 ] && [ -n "$2" ] || { echo "new-video: error: --cam-offset requires seconds" >&2; exit 1; }; CAM_OFFSET="$2"; shift 2;;
@@ -56,6 +58,10 @@ done
 case "$STYLE" in
   calm|documentary) ;;
   *) echo "new-video: error: --style must be calm or documentary (got '$STYLE')" >&2; exit 1;;
+esac
+case "$MODE" in
+  tutorial|short) ;;
+  *) echo "new-video: error: --mode must be tutorial or short (got '$MODE')" >&2; exit 1;;
 esac
 case "$VOICE" in
   screen|cam) ;;
@@ -257,14 +263,33 @@ cp "$SK/assets/tokens.css" "$VD/assets/ev1/"
 cp -R "$SK/assets/fonts" "$SK/assets/vendor" "$VD/assets/ev1/"
 cp "$SK/template/build.py" "$SK/template/PLAN.md" "$VD/"
 if [ "$STYLE" = calm ]; then printf '{\n  "recipe": "calm",\n  "promise": ""\n}\n' > "$VD/work/hook.json"; fi
-printf '{\n  "skill": "%s",\n  "created": "%s",\n  "style": "%s"\n}\n' "$SK" "$(date +%Y-%m-%d)" "$STYLE" > "$VD/kit.json"
+printf '{\n  "skill": "%s",\n  "created": "%s",\n  "style": "%s",\n  "mode": "%s"\n}\n' "$SK" "$(date +%Y-%m-%d)" "$STYLE" "$MODE" > "$VD/kit.json"
 
 ext="${REC##*.}"
 ln "$REC" "$VD/assets/media/src.$ext" 2>/dev/null || cp "$REC" "$VD/assets/media/src.$ext"
 
-echo "new-video: detecting Omarchy webcam overlay -> work/omarchy.json"
-if ! "$EV2_PY" "$SK/scripts/omarchy_detect.py" "$VD/assets/media/src.$ext" --out-json "$VD/work/omarchy.json" >"$VD/work/omarchy.log" 2>&1; then
-  echo "new-video: WARNING webcam detection failed (see work/omarchy.log); continuing without PiP data" >&2
+SRC_VERT="$("$EV2_PY" -c '
+import json, subprocess, sys
+r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+    "-show_entries", "stream=width,height", "-of", "json", sys.argv[1]], capture_output=True, text=True)
+if r.returncode == 0:
+    st = (json.loads(r.stdout).get("streams") or [{}])[0]
+    w, h = int(st.get("width") or 0), int(st.get("height") or 0)
+    print("1" if h > w and w > 0 else "0")
+else:
+    print("0")
+' "$VD/assets/media/src.$ext" 2>/dev/null || echo "0")"
+
+if [ "$MODE" = "short" ] && [ "$SRC_VERT" = "1" ]; then
+  echo "new-video: standalone vertical Short/Reel mode (1080x1920 native)"
+  printf '{\n  "has_webcam_overlay": false,\n  "width": 1080,\n  "height": 1920,\n  "vertical_source": true\n}\n' > "$VD/work/omarchy.json"
+  SCALE_VF="fps=30,scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2"
+else
+  echo "new-video: detecting Omarchy webcam overlay -> work/omarchy.json"
+  if ! "$EV2_PY" "$SK/scripts/omarchy_detect.py" "$VD/assets/media/src.$ext" --out-json "$VD/work/omarchy.json" >"$VD/work/omarchy.log" 2>&1; then
+    echo "new-video: WARNING webcam detection failed (see work/omarchy.log); continuing without PiP data" >&2
+  fi
+  SCALE_VF="fps=30,scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2"
 fi
 
 VENC=(-c:v libx264 -crf 14 -preset fast -g 30 -keyint_min 30)
@@ -274,7 +299,7 @@ if "$EV2_PY" "$SK/scripts/gpu.py" on >/dev/null 2>&1; then
 fi
 echo "new-video: camera/screencast -> assets/media/cam_raw.mp4 (raw, 30 fps CFR)"
 ffmpeg -nostdin -v error -stats -y -i "$VD/assets/media/src.$ext" -map 0:v:0 \
-  -vf "fps=30,scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2" \
+  -vf "$SCALE_VF" \
   "${VENC[@]}" -pix_fmt yuv420p \
   -color_range tv -colorspace bt709 -color_primaries bt709 -color_trc bt709 -an "$VD/assets/media/cam_raw.mp4"
 
@@ -308,8 +333,17 @@ echo
 echo "new-video: workspace ready at $VD  (${D}s)"
 [ -f "$VD/work/camera.json" ] && echo "camera: separate (work/camera.json) — the PiP comes from assets/media/cam_face.mp4"
 echo "next steps:"
-echo "  1. ev2 transcribe \"$VD\"       (words + work/timeline.json + work/cuts-report.md)"
-echo "  2. PLAN gate: chapters, inserts (recipes), callouts, hook.json promise -> approval"
-echo "  3. ev2 hook \"$VD\" --final     (the designed hook from work/hook.json)"
-echo "  4. ev2 inserts \"$VD\" --final  (only if the plan has inserts)"
-echo "  5. ev2 finish \"$VD\"           (final.mp4, Concat project, Short, chapters, verify + beauty check)"
+if [ "$MODE" = "short" ]; then
+  echo "  1. ev2 transcribe \"$VD\"       (words + tight Short cuts in work/timeline.json)"
+  echo "  2. ev2 shorts \"$VD\" --init    (generates work/shorts.json + face check sheet)"
+  echo "  3. Review work/shorts.json + ev2 check \"$VD\""
+  echo "  4. ev2 shorts \"$VD\" --final   (renders 1080x1920 Pro Short/Reel + captions + .srt)"
+  echo "  5. Optional: ev2 thumb \"$VD\" --init && ev2 thumb \"$VD\""
+else
+  echo "  1. ev2 transcribe \"$VD\"       (words + work/timeline.json + work/cuts-report.md)"
+  echo "  2. PLAN gate: chapters, inserts (recipes), callouts, hook.json promise -> approval"
+  echo "  3. ev2 hook \"$VD\" --final     (the designed hook from work/hook.json)"
+  echo "  4. ev2 inserts \"$VD\" --final  (only if the plan has inserts)"
+  echo "  5. ev2 finish \"$VD\"           (final.mp4, Concat project, Short, chapters, verify + beauty check)"
+  echo "  6. Optional: ev2 shorts \"$VD\" --init | ev2 thumb \"$VD\" --init | ev2 describe \"$VD\""
+fi

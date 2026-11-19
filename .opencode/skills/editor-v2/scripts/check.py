@@ -160,14 +160,23 @@ def main():
                 insert_hold = float(look['insert_hold'])
         except (ValueError, TypeError) as e:
             probs.append(f'look.json is not valid JSON: {e}')
+    kit_mode = 'tutorial'
+    kp = os.path.join(vd, 'kit.json')
+    if os.path.isfile(kp):
+        try:
+            kit_mode = json.load(open(kp, encoding='utf-8')).get('mode', 'tutorial')
+        except (OSError, ValueError):
+            pass
+
     hs = TL.frames(tl['hook_split']) / TL.FPS
     body = TL.body_duration(tl)
     chs = sorted(tl.get('chapters') or [], key=lambda c: float(c['src_t']))
-    if len(chs) < 3:
-        probs.append(f'chapters: {len(chs)} in work/timeline.json; YouTube needs at least 3 (one per topic, the first at the start of the body)')
-    for c in chs:
-        if len(c['title']) > 40:
-            probs.append(f'chapter "{c["title"]}": {len(c["title"])} chars, keep titles <= 40')
+    if kit_mode != 'short':
+        if len(chs) < 3:
+            probs.append(f'chapters: {len(chs)} in work/timeline.json; YouTube needs at least 3 (one per topic, the first at the start of the body)')
+        for c in chs:
+            if len(c['title']) > 40:
+                probs.append(f'chapter "{c["title"]}": {len(c["title"])} chars, keep titles <= 40')
     ins_ranges = None
     try:
         ins_ranges = TL.insert_ranges(tl)
@@ -185,15 +194,16 @@ def main():
                     probs.append(f'insert "{e["name"]}": dur {dur:g}s is too short for {n} items: use dur >= {need:g} (12 s recommended)')
         elif not os.path.isfile(os.path.join(vd, 'inserts.py')):
             probs.append(f'insert "{e.get("name")}": no "recipe" (use one of {", ".join(R.RECIPES)})')
-    notes += _explainer_tips(vd, tl, chs, body, ins_ranges, insert_every)
-    if body > 120 and not tl.get('callouts'):
-        notes.append('no callouts: point at 2-5 key buttons ("callouts" in work/timeline.json)')
+    if kit_mode != 'short':
+        notes += _explainer_tips(vd, tl, chs, body, ins_ranges, insert_every)
+        if body > 120 and not tl.get('callouts'):
+            notes.append('no callouts: point at 2-5 key buttons ("callouts" in work/timeline.json)')
     try:
         TL.key_ranges(tl)
     except TL.TimelineError as e:
         probs.append(str(e))
     hp = os.path.join(vd, 'work', 'hook.json')
-    if hs > 0:
+    if hs > 0 and kit_mode != 'short':
         if not os.path.isfile(hp):
             probs.append('work/hook.json missing: run `ev2 hook <dir> --init`, then write its "promise"')
         else:
@@ -205,7 +215,20 @@ def main():
                 probs.append(str(e))
         if hs > 32:
             notes.append(f'the hook is {hs:.0f}s: 15-30 s works best (`ev2 clean <dir> --hook-split S`)')
-    if not os.path.isfile(os.path.join(vd, 'work', 'inputs.json')):
+
+    # Validate work/shorts.json whenever present (or required in standalone short mode)
+    shp = os.path.join(vd, 'work', 'shorts.json')
+    if os.path.isfile(shp):
+        import ev2_shorts as SH
+        try:
+            sh_cfg = json.load(open(shp, encoding='utf-8'))
+            probs += SH.validate_shorts_cfg(sh_cfg)
+        except ValueError as e:
+            probs.append(f'work/shorts.json is not valid JSON: {e}')
+    elif kit_mode == 'short':
+        probs.append('work/shorts.json missing: run `ev2 shorts <dir> --init`')
+
+    if kit_mode != 'short' and not os.path.isfile(os.path.join(vd, 'work', 'inputs.json')):
         notes.append('no input log: zooms follow screen activity, no click ripples (record with `ev2 rec install` running next time)')
     for p in probs:
         print(f'  FIX   {p}')

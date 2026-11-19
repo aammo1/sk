@@ -30,7 +30,10 @@ sys.path.insert(0, HERE)
 import ev2_timeline as TL  # noqa: E402
 
 YT_LIMIT = 5000
+TAGS_LIMIT = 500
+TITLE_MAX = 70
 SLOT = '<!-- WRITE'
+LEAKS = [r'assets/', r'work/', r'\.png\b', r'\.jpe?g\b', r'\.wav\b', r'\bTODO\b', r'\bTBD\b', r'placeholder']
 HEADINGS = {
     'en': {'shows': 'What the video shows', 'chapters': 'Chapters', 'setup': 'Shown on', 'sources': 'Sources'},
     'fr': {'shows': 'Ce que montre la vidéo', 'chapters': 'Chapitres', 'setup': 'Configuration', 'sources': 'Sources'},
@@ -216,6 +219,79 @@ def build_text(vd, lang, apps, ch_lines, chapters):
     return '\n'.join(out) + '\n'
 
 
+def build_package_text(vd, lang, ch_lines):
+    """Build out/youtube-package.md: 5 CTR title angles, 3 thumbnail text hooks, tags, pinned comment."""
+    hk = load_json(os.path.join(vd, 'work', 'hook.json')) or {}
+    promise = str(hk.get('promise') or '').replace('*', '').strip()
+    brand = str(hk.get('brand') or '').strip()
+    hint = f' (promise: "{promise}")' if promise else ''
+    brand_hint = f' / brand: {brand}' if brand else ''
+    lines = [
+        f'# YouTube Upload Package ({lang})',
+        '',
+        '## Title Candidates (pick 1 — keep <= 65 chars for mobile)',
+        f'1. **Result / Time:** <!-- WRITE: title <= 65 chars, clear viewer outcome{hint} -->',
+        f'2. **Problem / Contrast:** <!-- WRITE: title <= 65 chars, pain point vs solution{brand_hint} -->',
+        '3. **Tool / Workflow:** <!-- WRITE: title <= 65 chars, exact tool + what you build -->',
+        '4. **Darija-Native:** <!-- WRITE: title <= 65 chars, natural Moroccan Darija hook -->',
+        '5. **Search / SEO:** <!-- WRITE: title <= 65 chars, clear searchable tutorial title -->',
+        '',
+        '## Thumbnail Text Pairings (2-4 words — complement title, do not repeat it)',
+        '- **Hero (`split-hero`):** <!-- WRITE: 2-4 punchy words -->',
+        '- **Stat (`big-stat`):** <!-- WRITE: big number + 2 words -->',
+        '- **Contrast (`compare-vs`):** <!-- WRITE: short Before vs After -->',
+        '',
+        '## Tags / Keywords (<= 500 chars, comma-separated)',
+        '<!-- WRITE: comma-separated Darija, French, and English keywords (<= 500 chars) -->',
+        '',
+        '## Pinned Comment',
+        '<!-- WRITE: 1-2 lines with a viewer question or resource link -->',
+        '',
+        '## Chapters (synced with out/youtube-description.md)',
+        *ch_lines,
+        '',
+    ]
+    return '\n'.join(lines)
+
+
+def _check_package(pkg_path):
+    """Validate out/youtube-package.md: slots, leaks, title lengths, tags length."""
+    text = open(pkg_path, encoding='utf-8').read()
+    slots = text.count(SLOT)
+    ok = True
+    print(f'describe(package): {slots} <!-- WRITE --> slot(s) left' + ('' if slots == 0 else ' (fill them)'))
+    ok &= slots == 0
+    leaks = sorted({m.group(0) for pat in LEAKS for m in re.finditer(pat, text, re.I)})
+    if leaks:
+        print(f'describe(package): internal notes/paths leaked: {", ".join(leaks[:6])}')
+        ok = False
+    # Check title lengths (numbered lines under Title Candidates)
+    in_titles, in_tags, long_titles, tags_len = False, False, [], 0
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith('## '):
+            in_titles = 'Title Candidates' in s
+            in_tags = 'Tags / Keywords' in s
+            continue
+        if in_titles and re.match(r'^\d+\.\s+', s) and SLOT not in s:
+            # Strip leading "1. **Label:** "
+            cleaned = re.sub(r'^\d+\.\s+(?:\*\*[^*]+\*\*\s*)?', '', s).strip()
+            if len(cleaned) > TITLE_MAX:
+                long_titles.append((cleaned[:35] + '...', len(cleaned)))
+        elif in_tags and s and not s.startswith('#') and SLOT not in s:
+            tags_len += len(s)
+    if long_titles:
+        print(f'describe(package): {len(long_titles)} title(s) over {TITLE_MAX} chars: ' +
+              ', '.join(f'{t} ({n})' for t, n in long_titles[:3]))
+        ok = False
+    if tags_len > TAGS_LIMIT:
+        print(f'describe(package): tags are {tags_len} / {TAGS_LIMIT} chars (shorten)')
+        ok = False
+    elif tags_len > 0:
+        print(f'describe(package): tags {tags_len} / {TAGS_LIMIT} chars')
+    return ok
+
+
 def write_notes(vd, chapters, title):
     words = []
     tl = TL.load(vd, required=False)
@@ -258,7 +334,7 @@ def chapters_block(text):
     return None
 
 
-def check(vd, label):
+def check(vd, label, strict_package=False):
     p = os.path.join(vd, 'out', 'youtube-description.md')
     if not os.path.isfile(p):
         raise DescribeError(f'{p} not found: run ev2 describe {label} first')
@@ -281,41 +357,65 @@ def check(vd, label):
     else:
         print(f'describe: no out/youtube-chapters.txt to compare (run ev2 finish {label})')
         ok = False
+    pkg_p = os.path.join(vd, 'out', 'youtube-package.md')
+    if os.path.isfile(pkg_p):
+        stamp = load_json(os.path.join(vd, 'work', 'description.json')) or {}
+        pkg_raw = open(pkg_p, encoding='utf-8').read()
+        untouched = bool(stamp.get('pkg_sha')) and sha256(pkg_raw) == stamp.get('pkg_sha')
+        if untouched and not strict_package:
+            print('describe(package): out/youtube-package.md not filled yet (optional; pass --package to require it)')
+        else:
+            ok &= _check_package(pkg_p)
     print('describe: ' + ('ready to paste into YouTube' if ok else 'not done yet'))
     return 0 if ok else 1
 
 
 def main():
-    ap = argparse.ArgumentParser(description='Write the YouTube description frame for a finished video.')
+    ap = argparse.ArgumentParser(description='Write the YouTube title/packaging/description files for a finished video.')
     ap.add_argument('video_dir')
     ap.add_argument('--lang', choices=sorted(HEADINGS), default='darija', help='Heading language (default darija)')
     ap.add_argument('--apps', default='', help='Comma-separated packages for the setup line (pacman -Q)')
-    ap.add_argument('--force', action='store_true', help='Overwrite a description edited since it was generated')
-    ap.add_argument('--check', action='store_true', help='Report what is left in the existing description (no writing)')
+    ap.add_argument('--description-only', action='store_true', help='Write out/youtube-description.md only (skip youtube-package.md)')
+    ap.add_argument('--package', action='store_true', help='With --check, require out/youtube-package.md slots to be filled')
+    ap.add_argument('--force', action='store_true', help='Overwrite files edited since they were generated')
+    ap.add_argument('--check', action='store_true', help='Report what is left in existing description & package (no writing)')
     a = ap.parse_args()
     vd = os.path.abspath(a.video_dir)
     try:
         if a.check:
-            return check(vd, a.video_dir)
+            return check(vd, a.video_dir, strict_package=a.package)
         ch_lines, chapters = read_chapters(vd, a.video_dir)
         out_p = os.path.join(vd, 'out', 'youtube-description.md')
+        pkg_p = os.path.join(vd, 'out', 'youtube-package.md')
         stamp_p = os.path.join(vd, 'work', 'description.json')
+        stamp = load_json(stamp_p) or {}
         if os.path.isfile(out_p) and not a.force:
-            stamp = load_json(stamp_p) or {}
             if sha256(open(out_p, encoding='utf-8').read()) != stamp.get('sha'):
                 raise DescribeError('out/youtube-description.md was edited since it was generated; '
+                                    'use --force to regenerate (your edits will be lost)')
+        if not a.description_only and os.path.isfile(pkg_p) and not a.force:
+            if stamp.get('pkg_sha') and sha256(open(pkg_p, encoding='utf-8').read()) != stamp.get('pkg_sha'):
+                raise DescribeError('out/youtube-package.md was edited since it was generated; '
                                     'use --force to regenerate (your edits will be lost)')
         apps = [x.strip() for x in a.apps.split(',') if x.strip()]
         text = build_text(vd, a.lang, apps, ch_lines, chapters)
         with open(out_p, 'w', encoding='utf-8') as f:
             f.write(text)
+        pkg_sha = None
+        if not a.description_only:
+            pkg_text = build_package_text(vd, a.lang, ch_lines)
+            with open(pkg_p, 'w', encoding='utf-8') as f:
+                f.write(pkg_text)
+            pkg_sha = sha256(pkg_text)
         with open(stamp_p, 'w', encoding='utf-8') as f:
-            json.dump({'sha': sha256(text), 'lang': a.lang,
+            json.dump({'sha': sha256(text), 'pkg_sha': pkg_sha, 'lang': a.lang,
                        'written': datetime.datetime.now().isoformat(timespec='seconds')}, f, indent=2)
         notes = write_notes(vd, chapters, plan_title(vd))
         print(f'describe: notes -> {os.path.relpath(notes, vd)}')
-        print(f'describe: out/youtube-description.md ({len(text)} chars, {text.count(SLOT)} slots to write). '
-              f'Next: fill the <!-- WRITE --> slots, then ev2 describe {a.video_dir} --check')
+        print(f'describe: out/youtube-description.md ({len(text)} chars, {text.count(SLOT)} slots to write)')
+        if not a.description_only:
+            print(f'describe: out/youtube-package.md (5 title angles + 3 thumbnail hooks + tags + pinned comment)')
+        print(f'Next: fill the <!-- WRITE --> slots, then ev2 describe {a.video_dir} --check')
         return 0
     except (DescribeError, TL.TimelineError) as e:
         print(f'describe: {e}')

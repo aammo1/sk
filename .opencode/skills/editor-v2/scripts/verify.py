@@ -486,13 +486,54 @@ def main():
         except Exception as e:
             add('WARN', 'beauty', f'beauty check could not run: {e}')
 
-    # loudness
+    # loudness + true peak
     r = subprocess.run(['ffmpeg', '-nostdin', '-i', 'out/final.mp4', '-af', 'ebur128=peak=true', '-f', 'null', '-'],
                        capture_output=True, text=True)
     m = re.findall(r'I:\s+(-?[\d.]+) LUFS', r.stderr)
+    tp = re.findall(r'Peak:\s+(-?[\d.]+) dBFS', r.stderr)
     if m:
         lufs = float(m[-1])
-        add('PASS' if -16 <= lufs <= -12 else 'WARN', 'loudness', f'{lufs:.1f} LUFS integrated')
+        tp_note = ''
+        if tp:
+            tp_val = float(tp[-1])
+            tp_note = f', peak {tp_val:.1f} dBTP'
+            if tp_val > -1.0:
+                add('WARN', 'true peak', f'{tp_val:.1f} dBTP (> -1.0 dBTP; AAC inter-sample overshoot)')
+        add('PASS' if -16 <= lufs <= -12 else 'WARN', 'loudness', f'{lufs:.1f} LUFS integrated{tp_note}')
+
+    # acoustic cut-tail check (WARN-only): flag body cuts where source voice is still decaying > 0.12 s past cut
+    real_segs = [s for s in segs if not s.get('card')]
+    if len(real_segs) > 1 and os.path.isfile(VOICE):
+        try:
+            vo_data, vo_sr = sf.read(VOICE, dtype='float32', always_2d=True)
+            mono = vo_data.mean(axis=1)
+            hop = max(1, int(vo_sr * 0.01))
+            n_win = len(mono) // hop
+            if n_win > 20:
+                rms = np.sqrt(np.mean(mono[:n_win * hop].reshape(n_win, hop) ** 2, axis=1) + 1e-12)
+                db = 20.0 * np.log10(rms)
+                loud = db[db > db.max() - 60]
+                if len(loud) > 10:
+                    room = max(float(np.percentile(db, 10)) + 10.0, float(np.percentile(loud, 60)) - 36.0)
+                    clipped = []
+                    for cur_s, nxt_s in zip(real_segs, real_segs[1:]):
+                        if abs(nxt_s['src_start'] - cur_s['src_end']) < 0.05:
+                            continue
+                        idx = int(cur_s['src_end'] / 0.01)
+                        if idx < 3 or idx >= len(db) - 2:
+                            continue
+                        last_db = float(db[max(0, idx - 3):idx].mean())
+                        j = idx
+                        while j < len(db) - 1 and db[j] > room and (j - idx) < 40:
+                            j += 1
+                        if last_db > room + 12.0 and (j - idx) * 0.01 > 0.12:
+                            clipped.append(f'{TL.fmt_ts(cur_s["src_end"])} (+{(j - idx) * 0.01:.2f}s)')
+                    if clipped:
+                        add('WARN', 'cut tails', f'{len(clipped)} cut(s) may clip word decay: {", ".join(clipped[:4])}')
+                    else:
+                        add('PASS', 'cut tails', f'{len(real_segs) - 1} joins clean (no clipped word decay)')
+        except Exception:
+            pass
     return report(vd)
 
 

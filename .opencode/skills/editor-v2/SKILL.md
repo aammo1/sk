@@ -1,12 +1,14 @@
 ---
 name: editor-v2
-description: "Edits Omarchy screencast recordings (Moroccan Darija + English tech terms, corner webcam) into a pro-looking YouTube tutorial: a designed hook (promise, montage of the app's own screens, end card) built from a short JSON, a polished body (screen inset on a branded backdrop, zoom-to-click, click ripples, callouts, speaker PiP, chapter cards, quiet music and sound effects), animated explainer inserts from data recipes (flow, steps, checklist, compare, stat, statement, screens), one synced final.mp4, a Concat (or Kdenlive) project, a 9:16 Short and YouTube chapters, all checked by a definition-of-done verifier and a beauty check. Optional: calm style, key-press pills, YouTube description, an input logger for exact clicks. Use when the user wants to edit, cut, caption or finish a recording/screencast/tutorial video, or mentions ev2, editor-v2, the hook, explainer insert, motion graphics, animated explanation, callout, zoom, click effects, Concat or Kdenlive projects for a video, key pills, shortcut overlay, calm style, title card, youtube description, separate camera, draft, GPU."
+description: "Edits Omarchy screencast recordings (Moroccan Darija + English tech terms, corner webcam) into pro YouTube tutorials AND high-retention 9:16 Shorts/Reels: starts with a Step 0 guided intake & recording inspection (`ev2 inspect`) that coaches the creator before editing, then builds a designed hook (promise, montage of the app's own screens, end card), polished body (screen inset on a branded backdrop, zoom-to-click, click ripples, callouts, speaker PiP, chapter cards, quiet music and sound effects), animated explainer inserts from data recipes, Pro 9:16 Shorts/Reels (`ev2 shorts`, stacked zoomed screen + recipe cards + Darija BiDi word-highlighted captions, plus standalone `--mode short`), dual-mode studio & optional OpenRouter AI thumbnails (`ev2 thumb`), full YouTube title/description/tags packaging (`ev2 describe`), Concat/Kdenlive projects, and VRAM-safe GPU encoding (including 8GB laptops like RTX 2070). Use when the user wants to edit, cut, caption, make Shorts/Reels, generate thumbnails, package titles/descriptions, or finish a recording/screencast/tutorial video, or mentions ev2, editor-v2, inspect, hook, explainer insert, motion graphics, callout, zoom, click effects, Concat or Kdenlive, key pills, calm style, youtube title/description, thumbnails, separate camera, draft, GPU."
 ---
 
 # Editor V2 — Darija screencast → pro YouTube tutorial
 
 One recording in, these out: `out/final.mp4` (hook + polished body, 1920x1080/30, −14 LUFS),
-`out/hook.mp4`, `out/concat/` (Concat project), `out/short.mp4` (9:16), `out/youtube-chapters.txt`,
+`out/hook.mp4`, `out/concat/` (Concat project), `out/shorts/<name>.mp4` (Pro 9:16 Shorts/Reels with
+word-highlighted Darija/BiDi captions), `out/thumbs/` (1280×720 thumbnails + 246×138 phone grid),
+`out/youtube-package.md` + `out/youtube-description.md` + `out/youtube-chapters.txt`,
 `out/captions.srt`, `out/verify.md` (pass/fail) and `out/beauty.md` (how pro it looks/sounds).
 
 ## The rule that makes it look pro: you write DATA, the code designs
@@ -64,28 +66,50 @@ If `ev2` is not on PATH, run `bash ~/.agents/skills/editor-v2/scripts/ev2 <comma
 `ev2 rec test` shows what the logger sees. It never stores typed characters, only key timing and
 Ctrl/Alt/Super shortcuts, and only while a recording runs.
 
-**Darija transcription model (recommended, once):** generic Whisper turns much of Darija into broken
+**Darija transcription model (recommended, once per machine):** generic Whisper turns much of Darija into broken
 standard Arabic. `ev2 convert-model amineouaki/whisper-medium-darija-combined float16` (or `int8` for CPU), then
 `export EV2_WHISPER_MODEL=~/.cache/editor-v2/models/whisper-medium-darija-combined-ct2`. Compare with
 `ev2 asr-check` before trusting it; transcribe with `--windowed`. Term fixes:
 `~/.config/editor-v2/darija-terms.json` (`{"فيرسل": "Vercel"}`), `EV2_HOTWORDS="Vercel, Supabase"`.
-On this machine: CUDA libs (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12`) and FP16 `whisper-medium-darija-combined-ct2` (`EV2_WHISPER_MODEL` in `~/.bashrc`) are installed, and Darija TTS models are downloaded at `~/Models/golha-darija-tts` (Darija+French code-switching) and `~/Models/lahgtna-omnivoice-v2`. If using those TTS models, install their dependencies (`golha-darija-tts` pins Python 3.12, `transformers==4.46.3`, CUDA `torch==2.6.0`) in a **separate** virtualenv — never into `~/.cache/editor-v2/venv`.
-Doctor must end with `All set`. A `MISSING` line is a blocker, so fix it before editing.
+**GPU / 8 GB VRAM laptops (e.g. RTX 2070):** `ev2 gpu status` auto-detects VRAM and caps concurrent NVENC
+sessions conservatively (3 on ≤ 8 GB GPUs, 6 on > 8 GB; override with `EV2_NVENC_SESSIONS`). Run one heavy
+GPU job at a time (never overlap transcription + NVENC renders). Sync the skill folder cleanly between
+machines and run `ev2 doctor` once per machine (`All set` required; any `MISSING` line is a blocker).
+
+## Step 0 — Guided Intake & Pre-Edit Coaching (ALWAYS FIRST)
+
+Whenever the user gives you a video path (or says "edit my latest recording"), **do NOT run `ev2 init` or
+`ev2 transcribe` yet**. First run the read-only pre-edit probe:
+```bash
+ev2 inspect <file|--latest> [--cam FILE]
+```
+Then present a short 3–5 bullet summary of what you found (duration, aspect ratio, audio health, input log /
+separate cam status, GPU/VRAM & recommended `--jobs`, plus any recording heads-up) and **guide/ask the
+creator in ONE concise set of choices** before creating a workspace:
+1. **What are we making?** Full YouTube Tutorial (16:9) | Tutorial + Pro 9:16 Shorts | Standalone 9:16 Short/Reel (`--mode short`)
+2. **Style & pacing:** Documentary (fast montage hook, default) | Calm (clean title card) | Tight Reel
+3. **Packaging deliverables:** Pro 9:16 Shorts (`ev2 shorts`), Thumbnails (`ev2 thumb`: free local studio vs optional OpenRouter AI), YouTube Titles + Description + Tags (`ev2 describe`)
+4. **Spoken language & extras:** Darija (default) / EN / FR; voice track choice if separate cam was detected.
+
+Only proceed to Step 1 after the creator confirms the direction.
 
 ## The workflow (agent: follow in order, stop where marked)
 
 | # | Command | Agent does |
 |---|---|---|
-| 1 | `ev2 init <file\|--latest> [name] [--style calm]` | Confirm which recording. Creates `~/editor-v2/videos/<name>/`, reads the input log into `work/inputs.json` if there is one. Separate camera: `--cam FILE` (or automatic from `ev2 rec cam`). |
+| 0 | `ev2 inspect <file\|--latest>` | **STOP & GUIDE:** Read-only probe of video/audio/cam/input-log/GPU. Summarize findings and confirm format, style, and deliverables with the creator before starting. |
+| 1 | `ev2 init <file\|--latest> [name] [--mode tutorial\|short] [--style calm]` | Creates `~/editor-v2/videos/<name>/`, reads input log into `work/inputs.json`. Use `--mode short` for standalone Shorts/Reels (keeps native 1080×1920 for vertical files). Separate camera: `--cam FILE`. |
 | 2 | `ev2 transcribe <dir>` | Words, `work/timeline.json`, `work/cuts-report.md`. Language `ar`; never `auto` for Darija. Refuses to overwrite a hand-corrected `words.json` (`--force` keeps a backup). |
 | 2b | `ev2 draft <dir> [--retakes]` | Optional, before the PLAN gate: a 720p rough cut with source times and retake markers (~1 min). Show it to the creator to agree cuts, chapters and insert moments. Never a deliverable. |
-| 3 | `ev2 hook <dir> --init` | Writes `work/hook.json` with auto-picked shots. Read the list it prints. |
-| 4 | **PLAN gate** (below) | Fill `PLAN.md`; write chapters, inserts (recipes), callouts into `work/timeline.json` and the promise into `work/hook.json`. Run `ev2 check <dir>` until `ready`. **STOP and get explicit approval.** |
-| 5 | `ev2 hook <dir>` then `ev2 hook <dir> --final` | Renders `out/render.mp4` (~2 min). The final build refuses while `hook.json` has problems. |
+| 3 | `ev2 hook <dir> --init` | Tutorial mode: writes `work/hook.json` with auto-picked shots. (Short mode: run `ev2 shorts <dir> --init` instead.) |
+| 4 | **PLAN gate** (below) | Fill `PLAN.md`; write chapters, inserts (recipes), callouts into `work/timeline.json`, promise into `work/hook.json` (and `work/shorts.json` if making Pro Shorts). Run `ev2 check <dir>` until `ready`. **STOP and get explicit approval.** |
+| 5 | `ev2 hook <dir>` then `ev2 hook <dir> --final` | Tutorial mode: renders `out/render.mp4` (~2 min). Refuses while `hook.json` has problems. |
 | 6 | `ev2 inserts <dir> --final` | Only if the plan has inserts (~35 s each). |
-| 7 | `ev2 finish <dir>` | Everything else, then verify + beauty check (~15-25 min for a 6 min video). Preview a few seconds first if you changed the look: `ev2 body <dir> --preview 40,55`. `--jobs auto` renders the body in parallel chunks (faster; later small changes re-render only their chunk). |
-| 8 | Read `out/verify.md` (and `out/beauty.md`) | Fix every FAIL (see the table at the end); report every WARN to the user. |
-| 9 | `ev2 describe <dir>` | Optional. Fill every `<!-- WRITE -->` slot from `work/description-notes.md`, then `--check`. |
+| 7 | `ev2 finish <dir> [--deband]` | Tutorial mode: `final.mp4`, `hook.mp4`, Concat/Kdenlive, chapters, verify + beauty check. Use `--jobs auto` (VRAM-safe) and optional `--deband` for dark-gradient smoothing. |
+| 8 | Read `out/verify.md` (and `out/beauty.md`) | Fix every FAIL (see table at end); report every WARN (including true peak / cut-tail warnings) to the user. |
+| 9 | `ev2 shorts <dir> --init` → `ev2 shorts <dir> --final` | Pro 1080×1920 Shorts/Reels: stacked zoomed screen + recipe cards + Darija BiDi word-highlighted captions + native-res face band. Always read `out/shorts/<name>_face_check.png` and `_review.jpg`. |
+| 10 | `ev2 thumb <dir> --init` → `ev2 thumb <dir>` | Dual-mode 1280×720 thumbnails: free local studio (`work/thumbs.json`) + `grid.png` + `grid_phone.png` (246×138). Opt-in OpenRouter AI: `ev2 thumb <dir> --ai "<brief>"` (only when asked). |
+| 11 | `ev2 describe <dir> [--lang darija\|en\|fr]` | Writes `out/youtube-package.md` (5 title angles, 3 thumbnail text hooks, tags, pinned comment) + `out/youtube-description.md`. Fill all `<!-- WRITE -->` slots from `work/description-notes.md`, then `--check`. |
 
 `ev2 finish --editor concat|kdenlive|both|none` (default: `concat` when Concat is installed, else `none`; or `EV2_EDITOR`).
 Other flags: `--captions`, `--no-keys`, `--no-zoom`, `--no-cam`, `--raw-body` (plain cuts, the fastest; no inserts),
@@ -208,7 +232,8 @@ T6 empty for music; T7 inserts (hidden, reference). Regenerated by finish (an ed
 
 ## Read these when you need them
 - **Writing hook.json, inserts, callouts, look: `reference/recipes.md` (start here).**
+- **Pro 9:16 Shorts, standalone Reels & Thumbnails: `reference/shorts-and-thumbs.md`.**
 - Captions / transcripts in Darija: `reference/darija-guide.md`. Sound roles: `reference/sound-design.md`.
 - Experts only (custom hook/scenes): `reference/devices.md`, `reference/look.md`, `template/build_custom.py`,
   `reference/sourcing.md` (footage + rights), `reference/edl/` (open one section at a time, never whole).
-- Tests: `scripts/test_pipeline.py` (assembly + failure paths), `scripts/test_v31.py` (v3.1 features), `components/test_components.py`, `components/test_pro.py`.
+- Tests: `scripts/test_pipeline.py` (assembly + failure paths), `scripts/test_v31.py` (v3.1 features), `scripts/test_v32.py` (v3.2 intake, Pro Shorts, thumbnails, YT packaging, RTX 2070 VRAM caps), `components/test_components.py`, `components/test_pro.py`.

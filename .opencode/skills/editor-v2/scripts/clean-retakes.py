@@ -234,8 +234,8 @@ def main():
     ap.add_argument('--hook-split', type=float, default=None,
                     help='Hook length in source seconds (default: keep the current one, else 45). 0 = no hook.')
     ap.add_argument('--no-snap', action='store_true', help='Do not snap the hook split to the nearest pause')
-    ap.add_argument('--max-silence', type=float, default=0.6, help='Pauses longer than this are shortened (s)')
-    ap.add_argument('--keep', type=float, default=0.30, help='Air kept in a shortened pause (s)')
+    ap.add_argument('--max-silence', type=float, default=None, help='Pauses longer than this are shortened (s; default 0.6 tutorial / 0.45 short)')
+    ap.add_argument('--keep', type=float, default=None, help='Air kept in a shortened pause (s; default 0.30 tutorial / 0.18 short)')
     ap.add_argument('--busy-keep', type=float, default=1.2, help='Air kept when the screen is busy in the pause (s)')
     ap.add_argument('--min-keep', type=float, default=0.5, help='Never leave a kept piece shorter than this (s)')
     ap.add_argument('--pad', type=float, default=0.08, help='Air kept before a retake restart (s)')
@@ -248,6 +248,25 @@ def main():
         sys.exit("clean-retakes: --apply was removed. Cuts are applied by `ev2 finish` from work/timeline.json.")
 
     vd = os.path.abspath(a.video_dir)
+    kit_mode = 'tutorial'
+    kit_path = os.path.join(vd, 'kit.json')
+    if os.path.isfile(kit_path):
+        try:
+            kit_mode = json.load(open(kit_path, encoding='utf-8')).get('mode', 'tutorial')
+        except (ValueError, OSError):
+            pass
+    if a.max_silence is None:
+        a.max_silence = 0.45 if kit_mode == 'short' else 0.6
+    if a.keep is None:
+        a.keep = 0.18 if kit_mode == 'short' else 0.30
+    if kit_mode == 'short':
+        om_p = os.path.join(vd, 'work', 'omarchy.json')
+        if os.path.isfile(om_p):
+            try:
+                if json.load(open(om_p, encoding='utf-8')).get('vertical_source'):
+                    a.no_screen = True
+            except (ValueError, OSError):
+                pass
     work = os.path.join(vd, 'work')
     os.makedirs(work, exist_ok=True)
 
@@ -289,6 +308,8 @@ def main():
     elif old_tl:
         hs = float(old_tl['hook_split'])
         a.no_snap = True  # keep the previously chosen split exactly
+    elif kit_mode == 'short':
+        hs = 0.0
     else:
         hs = 45.0
     hs = max(0.0, min(hs, duration))

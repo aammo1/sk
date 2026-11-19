@@ -7,7 +7,7 @@ SELF="$(readlink -f "${BASH_SOURCE[0]}")"
 SK="$(cd "$(dirname "$SELF")/.." && pwd)"
 source "$SK/scripts/env.sh"
 
-VERSION="editor-v2 3.1.0"
+VERSION="editor-v2 3.2.0"
 
 usage() {
   cat <<'EOF'
@@ -19,7 +19,9 @@ Before you record (once):
 
 Pipeline (in order):
   doctor [--install-speech]        Check/install everything; links ev2 into ~/.local/bin
-  init <file|--latest> [name] [--style calm] [--cam FILE [--cam-offset S] [--voice screen|cam]] [--no-cam]
+  inspect <file|--latest> [--cam FILE] [--json]
+                                   Step 0 read-only probe: video/audio health, cam, input log, GPU/VRAM, coaching brief
+  init <file|--latest> [name] [--mode tutorial|short] [--style calm] [--cam FILE [--cam-offset S] [--voice screen|cam]] [--no-cam]
                                    New video dir from a recording (cam_raw.mp4, vo.wav, omarchy.json, inputs.json)
   init --from-director <handoff> [name] [--dir parent] [--style calm|documentary]
                                    New video dir from a tutorial-director handoff (no ASR, no webcam)
@@ -30,14 +32,22 @@ Pipeline (in order):
                                    -> out/draft.mp4; allowed before the PLAN gate
   clean <dir> [--hook-split S] [--retakes]
                                    Re-run silence/retake cutting after editing cuts.json
-  check <dir>                      Validate timeline.json / hook.json / look.json before rendering
+  check <dir>                      Validate timeline.json / hook.json / look.json / shorts.json before rendering
   hook <dir> [--init] [--final] [--no-render]
                                    The designed hook from work/hook.json (--init: auto-pick the shots)
   inserts <dir> [--final] [--only NAME] [--force]
                                    Explainer inserts from recipes (or inserts.py scenes) -> work/inserts/
-  finish <dir> [--editor concat|kdenlive|both|none] [--no-keys] [--jobs N|auto]
+  finish <dir> [--editor concat|kdenlive|both|none] [--no-keys] [--deband] [--jobs N|auto]
                                    final.mp4 + hook.mp4 + editor project + Short + chapters, then verify
   verify <dir>                     Definition of done + beauty check -> out/verify.md (exit 1 = not done)
+
+Pro Shorts, Thumbnails & YouTube Packaging:
+  shorts <dir> [--init] [--final] [--only NAME] [--nudge PX] [--deband]
+                                   Pro 1080x1920 Shorts/Reels (stacked zoomed screen + recipe cards + Darija word captions)
+  thumb <dir> [--init] [--face FILE] [--ai "<brief>"] [--list-models]
+                                   Dual-mode 1280x720 thumbnails (local studio + optional OpenRouter AI) + phone grid
+  describe <dir> [--lang darija|en|fr] [--apps a,b] [--force] [--check]
+                                   YouTube upload package: 5 titles + thumbnail hooks + tags + description
 
 Look:
   look <dir> [--accent auto|#hex] [--frame inset|full] [--max-zoom Z] [--trim auto|off]
@@ -51,15 +61,14 @@ Optional extras (off unless you ask):
                                    Hook style: designed montage (default), calm title card, or hand-written
   keys <dir>                       Suggest key pills from the transcript -> work/keys-suggest.md
                                    (copy the ones you want into "keys" in work/timeline.json)
-  describe <dir> [--lang darija|en|fr] [--apps a,b] [--force] [--check]
-                                   YouTube description frame -> out/youtube-description.md
 
 Tools:
+  gpu [status|on]                  Check GPU, VRAM, NVENC session cap (protects 8GB laptops like RTX 2070)
   concat <dir>                     (Re)generate the Concat project out/concat/concat.json
   kdenlive <dir>                   (Re)generate out/project.kdenlive
   body <dir> [--plan-only] [--preview T0,T1] [--jobs N|auto]
                                    Plan zooms, render the polished body, or preview a few seconds of it
-  short <in.mp4> <out.mp4> [...]   9:16 Short from a 16:9 video
+  short <in.mp4> <out.mp4> [...]   Legacy quick 9:16 crop extractor
   convert-model <hf-repo-id>      Make a Hugging Face Whisper fine-tune (e.g. Darija) usable by transcribe
   asr-check <dir> --ref FILE [--from S --to S]
                                    Word error rate of the transcript against your own reference text
@@ -77,6 +86,8 @@ CMD="$1"; shift
 
 case "$CMD" in
   doctor)     exec bash "$SK/scripts/doctor.sh" "$@" ;;
+  inspect)    exec "$EV2_PY" "$SK/scripts/inspect_source.py" "$@" ;;
+  gpu)        exec "$EV2_PY" "$SK/scripts/gpu.py" "${@:-status}" ;;
   init)       exec bash "$SK/scripts/new-video.sh" "$@" ;;
   transcribe)
     need_dir "$@"; VD="$1"; shift
@@ -115,6 +126,8 @@ case "$CMD" in
   rec)        exec python3 "$SK/scripts/rec.py" "$@" ;;
   keys)       need_dir "$@"; exec "$EV2_PY" "$SK/scripts/keys-suggest.py" "$@" ;;
   describe)   need_dir "$@"; exec "$EV2_PY" "$SK/scripts/describe.py" "$@" ;;
+  shorts)     need_dir "$@"; exec "$EV2_PY" "$SK/scripts/shorts.py" "$@" ;;
+  thumb)      exec "$EV2_PY" "$SK/scripts/thumb.py" "$@" ;;
   concat)     need_dir "$@"; exec "$EV2_PY" "$SK/scripts/concat-gen.py" "$@" ;;
   kdenlive)   need_dir "$@"; exec "$EV2_PY" "$SK/scripts/kdenlive-gen.py" "$@" ;;
   short)      exec "$EV2_PY" "$SK/scripts/short-extract.py" "$@" ;;

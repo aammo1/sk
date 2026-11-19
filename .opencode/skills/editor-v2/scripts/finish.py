@@ -132,7 +132,8 @@ def write_body_voice(vo_path, segs, out_path, hook_split):
 
 VOICE_FX = ('highpass=f=80,afftdn=nr=10:nf=-45:tn=1,deesser=i=0.35,'
             'equalizer=f=250:t=q:w=1:g=-2,equalizer=f=4500:t=q:w=1.4:g=2,'
-            'acompressor=threshold=-22dB:ratio=3:attack=8:release=160:makeup=3dB,alimiter=limit=0.95')
+            'acompressor=threshold=-22dB:ratio=3:attack=8:release=160:makeup=3dB,'
+            'alimiter=limit=0.95:level=disabled:latency=1')
 
 
 def clean_voice(src, dst):
@@ -214,6 +215,8 @@ def main():
     ap.add_argument('--crf', default=os.environ.get('EV2_CRF', '18'))
     ap.add_argument('--jobs', default=os.environ.get('EV2_JOBS', '1'),
                     help='Body render workers: N or auto (default 1; EV2_JOBS)')
+    ap.add_argument('--deband', action='store_true',
+                    help='Smooth dark gradient banding + faint static grain on final encode')
     a = ap.parse_args()
     if a.jobs != 'auto':
         try:
@@ -421,7 +424,11 @@ def main():
         chains.append(f"[{bi_}:v]select='{select_expr(segs)}',settb=1/{FPS},setpts=N,{norm_v}[bv]")
     ai = len(inputs) // 2
     inputs += ['-i', 'work/final_audio.wav']
-    chains.append('[hv][bv]concat=n=2:v=1:a=0[v]' if has_hook else '[bv]null[v]')
+    chains.append('[hv][bv]concat=n=2:v=1:a=0[v0]' if has_hook else '[bv]null[v0]')
+    if a.deband:
+        chains.append('[v0]deband=1thr=0.012:2thr=0.012:3thr=0.012:range=24:blur=1,noise=alls=3:allf=u[v]')
+    else:
+        chains.append('[v0]null[v]')
     fg_path = 'work/final.filtergraph'
     open(fg_path, 'w').write(';\n'.join(chains))
     cmd = ['ffmpeg', '-nostdin', '-v', 'error', '-stats', '-y', *inputs, '-/filter_complex', fg_path,
