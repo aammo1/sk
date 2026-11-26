@@ -29,6 +29,14 @@ Select an agent that targets `~/.agents/skills/` when installing globally (Codex
 
 A fresh Omarchy machine ends up with the repo's skills plus `diagnose-crash` and `omarchy`, which live in `/usr/share/omarchy/default/agents/skills` and are intentionally not duplicated here.
 
+### Always-on ADHD output (optional)
+
+After installing `i-have-adhd`, enable it automatically in every new session (Antigravity, Claude Code, Codex, OpenCode):
+
+```sh
+bash ~/.agents/skills/i-have-adhd/scripts/enable-always-on.sh
+```
+
 ## Which root each agent reads
 
 | Root | DSH | Claude Code | OpenCode |
