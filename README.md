@@ -31,7 +31,17 @@ A fresh Omarchy machine ends up with the repo's skills plus `diagnose-crash` and
 
 ### Vendored: ponytail (MIT)
 
-The six `ponytail*` skills in `.opencode/skills/` come from [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail); license in `LICENSE-ponytail.txt`. Vendored 2026-11-27 — updates are manual. Only the skills are vendored: ponytail's always-on ruleset, `/ponytail lite|full|ultra` levels and status band require its OpenCode plugin.
+The six `ponytail*` skills come from [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail); license in `LICENSE-ponytail.txt`. Vendored 2026-11-27 — updates are manual. Only the skills are vendored: ponytail's always-on ruleset, `/ponytail lite|full|ultra` levels and status band require its OpenCode plugin.
+
+The five variants are nested under `.opencode/skills/ponytail/` to keep the skill root tidy. **Installs must use `--full-depth`**, or the `skills` CLI finds only `ponytail` and skips the nested ones:
+
+```sh
+npx skills add aammo1/sk -g -a codex -y --full-depth \
+  -s ponytail -s ponytail-review -s ponytail-audit \
+  -s ponytail-debt -s ponytail-gain -s ponytail-help
+```
+
+The CLI flattens them into `~/.agents/skills/<name>/` at install time, so agents still see six top-level skills. DSH's validator only scans one level deep, so validate the installed root for these: `uv run --script ~/.dsh/tools/skill_check.py ~/.agents/skills`.
 
 ### Always-on ADHD output (optional)
 
