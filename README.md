@@ -7,7 +7,7 @@ Every skill I use, in the `SKILL.md` format shared by DSH (DeepSeek Harness), Cl
 .opencode/archive/                  reference material, not loadable
 ```
 
-The `skills` CLI finds a `SKILL.md` anywhere in the repo, so the `.opencode/skills` directory name is cosmetic, not a requirement.
+The `skills` CLI finds `SKILL.md` files in any folder, so the `.opencode/skills` directory name is cosmetic. It stops descending once a folder has its own `SKILL.md`; add `--full-depth` to find skills nested under a skill bundle.
 
 ## Install
 
@@ -42,6 +42,14 @@ npx skills add aammo1/sk -g -a codex -y --full-depth \
 ```
 
 The CLI flattens them into `~/.agents/skills/<name>/` at install time, so agents still see six top-level skills. DSH's validator only scans one level deep, so validate the installed root for these: `uv run --script ~/.dsh/tools/skill_check.py ~/.agents/skills`.
+
+### Nested bundles: when `--full-depth` matters
+
+- `ponytail/` has its own `SKILL.md`, so the default scan stops there: its 5 variants need `--full-depth`.
+- `hyperframes/` has **no** root `SKILL.md`, so the default scan enters it and finds all 9 skills (`figma`, `hyperframes`, `hyperframes-cli`, `hyperframes-registry`, `media-use`, `remotion-to-hyperframes`, `reverse-any-video`, `slideshow`, `style-sampling`). Each has its own `LICENSE.txt`.
+- `nextjs/upstream/SKILL.md` is the only other nested skill; it needs `--full-depth` too.
+- DSH's validator scans one level only and will warn "no SKILL.md (not a skill bundle)" for `hyperframes/`; that is cosmetic. Validate `~/.agents/skills` after installing.
+
 
 ### Always-on ADHD output (optional)
 
