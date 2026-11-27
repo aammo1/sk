@@ -29,6 +29,10 @@ Select an agent that targets `~/.agents/skills/` when installing globally (Codex
 
 A fresh Omarchy machine ends up with the repo's skills plus `diagnose-crash` and `omarchy`, which live in `/usr/share/omarchy/default/agents/skills` and are intentionally not duplicated here.
 
+### Vendored: ponytail (MIT)
+
+The six `ponytail*` skills in `.opencode/skills/` come from [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail); license in `LICENSE-ponytail.txt`. Vendored 2026-11-27 — updates are manual. Only the skills are vendored: ponytail's always-on ruleset, `/ponytail lite|full|ultra` levels and status band require its OpenCode plugin.
+
 ### Always-on ADHD output (optional)
 
 After installing `i-have-adhd`, enable it automatically in every new session (Antigravity, Claude Code, Codex, OpenCode):
